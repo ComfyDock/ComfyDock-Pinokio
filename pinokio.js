@@ -4,24 +4,20 @@ module.exports = {
   icon: "icon.png",
   menu: [
     {
+      text: "Install",
+      href: "install.json",
+    },
+    {
       text: "Start",
-      href: "ComfyEnvManager.json",
-    },
-    {
-      text: "Show UI",
-      href: "http://localhost:8188",
-    },
-    {
-      text: "Install Gradio",
-      href: "install_gradio.json",
-    },
-    {
-      text: "Run Gradio",
       href: "start.json",
     },
     {
-      text: "Show Gradio",
-      href: "http://localhost:7860",
-    }
+      text: "Show Environments",
+      href: "http://localhost:5173",
+    },
+    {
+      text: "ComfyUI",
+      href: "http://localhost:8188",
+    },
   ]
 }

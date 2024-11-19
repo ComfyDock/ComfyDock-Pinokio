@@ -1,10 +1,9 @@
 {
-  "daemon": true,
   "run": [{
     "method": "shell.run",
     "params": {
       "venv": "env",
-      "message": "python main.py"
+      "message": "pip install -r requirements.txt"
     }
   }]
 }
