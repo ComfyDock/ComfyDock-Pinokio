@@ -1,0 +1,8 @@
+{
+  "run": [{
+    "method": "shell.run",
+    "params": {
+      "message": "python manager.py"
+    }
+  }]
+}
