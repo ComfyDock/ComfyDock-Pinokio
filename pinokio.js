@@ -5,11 +5,11 @@ module.exports = {
   menu: [
     {
       text: "Install",
-      href: "install.json",
+      href: "scripts/install.json",
     },
     {
       text: "Start",
-      href: "start.json",
+      href: "scripts/start.json",
     },
     {
       text: "Show Environments",

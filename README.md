@@ -1,1 +1,1 @@
-conda activate my-env
+comfyui environment manager

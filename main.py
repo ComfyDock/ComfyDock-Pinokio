@@ -1,4 +1,3 @@
-import subprocess
 import tarfile
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -274,6 +273,7 @@ def create_environment(env: Environment):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.post("/environments/{id}/duplicate")
 def duplicate_environment(id: str, env: Environment):
     """Duplicate a container by committing its state to an image and running a new container."""
@@ -386,6 +386,7 @@ def delete_environment(id: str):
     except docker.errors.APIError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+
 @app.get("/environments/{name}/status")
 def get_environment_status(name: str):
     """Get the status of a Docker container."""
@@ -437,10 +438,6 @@ def activate_environment(id: str, options: dict = {}):
         copy_to_container(id, local_custom_nodes_path, container_custom_nodes_path, EXCLUDE_CUSTOM_NODE_DIRS)
         install_custom_nodes(id, BLACKLIST_REQUIREMENTS, EXCLUDE_CUSTOM_NODE_DIRS)
         restart_container(id)
-    # elif options.get("install_custom_nodes"):
-    #     print("installing custom nodes")
-    #     install_custom_nodes(id, BLACKLIST_REQUIREMENTS, EXCLUDE_CUSTOM_NODE_DIRS)
-    #     restart_container(id)
         
     env.status = "running"
     save_environments(environments)
