@@ -4,7 +4,7 @@
     "method": "shell.run",
     "params": {
       "venv": "env",
-      "message": "python main.py"
+      "message": "python app.py"
     }
   }]
 }
