@@ -142,6 +142,8 @@ def copy_directories_to_container(container_id: str, comfyui_path: Path, mount_c
         "input": "input"
     }
     installed_custom_nodes = False
+    
+    print(f'mount_config: {mount_config}')
 
     for key, action in mount_config.items():
         if action == "copy":
@@ -281,7 +283,13 @@ def create_mounts(env: Environment):
     }
 
     # Retrieve the mount configuration from the environment options
-    mount_config = env.options.get("mount_config", {})
+    try:
+        mount_config = json.loads(env.options.get("mount_config", "{}"))
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid mount configuration. Please ensure it is valid JSON.")
+    
+    print(f'mount_config: {mount_config}')
+    print(f'type of mount_config: {type(mount_config)}')
 
     comfyui_path = Path(env.comfyui_path)
     for key, action in mount_config.items():
@@ -567,7 +575,10 @@ def activate_environment(id: str, options: dict = {}):
     comfyui_path = Path(env.comfyui_path)
     
     # Check mount_config for directories to copy
-    mount_config = env.options.get("mount_config", {})
+    try:
+        mount_config = json.loads(env.options.get("mount_config", "{}"))
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid mount configuration. Please ensure it is valid JSON.")
 
     if env.status == "created":
         installed_custom_nodes = copy_directories_to_container(id, comfyui_path, mount_config)
