@@ -1,4 +1,5 @@
 import tarfile
+import time
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import docker
@@ -10,6 +11,8 @@ from git import Repo
 import posixpath
 import re
 from fastapi.middleware.cors import CORSMiddleware
+from pathlib import Path
+import tempfile
 
 # Constants
 FRONTEND_ORIGIN = "http://localhost:8000"
@@ -17,7 +20,7 @@ CONTAINER_COMFYUI_PATH = "/app/ComfyUI"
 SIGNAL_TIMEOUT = 2
 BLACKLIST_REQUIREMENTS = ['torch']
 EXCLUDE_CUSTOM_NODE_DIRS = ['__pycache__', 'ComfyUI-Manager']
-INCLUDE_USER_COMFYUI_DIRS = ['models', 'styles', 'input', 'output', 'user']
+INCLUDE_USER_COMFYUI_DIRS = ['models', 'input', 'output', 'user']
 COMFYUI_PORT = 8188
 DB_FILE = "environments.json"
 STOP_OTHER_RUNNING_CONTAINERS = True
@@ -46,7 +49,7 @@ def save_environments(data):
 # Helper function to load and save JSON data
 def load_environments():
     environments = []
-    if os.path.exists(DB_FILE):
+    if Path(DB_FILE).exists():
         with open(DB_FILE, "r") as f:
             environments = json.load(f)
     
@@ -80,29 +83,87 @@ class Environment(BaseModel):
     metadata: dict = {}
 
 
+def ensure_directory_exists(container, path):
+    """Ensure that a directory exists in the container."""
+    try:
+        # Execute a command to create the directory if it doesn't exist
+        container.exec_run(f"mkdir -p {path}")
+    except docker.errors.APIError as e:
+        print(f"Error creating directory {path} in container: {e}")
+        raise
+
 def copy_to_container(container_id: str, source_path: str, container_path: str, exclude_dirs: list = []):
-    container = client.containers.get(container_id)
+    try:
+        container = client.containers.get(container_id)
 
-    # Create a tar archive of the source directory or file
-    with tarfile.open("archive.tar", mode="w") as archive:
-        # Add each file in the source directory to the archive
-        for root, dirs, files in os.walk(source_path):
-            # Modify dirs in-place to exclude specified directories
-            dirs[:] = [d for d in dirs if d not in exclude_dirs]
-            for file in files:
-                full_path = os.path.join(root, file)
-                # Calculate the relative path to maintain the directory structure
-                relative_path = os.path.relpath(full_path, start=source_path)
-                archive.add(full_path, arcname=relative_path)
+        # Ensure the target directory exists in the container
+        ensure_directory_exists(container, container_path)
 
-    # Send the tar archive to the container
-    with open("archive.tar", "rb") as tar_data:
-        container.put_archive(container_path, tar_data)
+        # Use a temporary directory for the tar file
+        with tempfile.TemporaryDirectory() as temp_dir:
+            tar_path = Path(temp_dir) / "archive.tar"
 
-    # Clean up the tar archive
-    os.remove("archive.tar")
-    print(f"Copied {source_path} to {container_id}:{container_path}")
+            # Create a tar archive of the source directory or file
+            with tarfile.open(tar_path, mode="w") as archive:
+                # Add each file in the source directory to the archive
+                for root, dirs, files in os.walk(source_path):
+                    # Modify dirs in-place to exclude specified directories
+                    dirs[:] = [d for d in dirs if d not in exclude_dirs]
+                    for file in files:
+                        full_path = Path(root) / file
+                        # Calculate the relative path to maintain the directory structure
+                        relative_path = full_path.relative_to(source_path)
+                        archive.add(str(full_path), arcname=str(relative_path))
 
+            # Send the tar archive to the container
+            with open(tar_path, "rb") as tar_data:
+                print(f"Sending {source_path} to {container_id}:{container_path}")
+                try:
+                    container.put_archive(container_path, tar_data)
+                    print(f"Copied {source_path} to {container_id}:{container_path}")
+                except Exception as e:
+                    print(f"Error sending {source_path} to {container_id}:{container_path}: {e}")
+                    raise
+
+    except docker.errors.NotFound:
+        print(f"Container {container_id} not found.")
+    except docker.errors.APIError as e:
+        print(f"Docker API error: {e}")
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
+
+def copy_directories_to_container(container_id: str, comfyui_path: Path, mount_config: dict):
+    """Copy specified directories from the host to the container based on the mount configuration."""
+    path_mapping = {
+        "custom_nodes": "custom_nodes",
+        "user": "user",
+        "models": "models",
+        "output": "output",
+        "input": "input"
+    }
+    installed_custom_nodes = False
+
+    for key, action in mount_config.items():
+        if action == "copy":
+            dir_name = path_mapping.get(key, key)
+            local_path = comfyui_path / Path(dir_name)
+            container_path = (Path(CONTAINER_COMFYUI_PATH) / Path(dir_name)).as_posix()
+            print(f"dirname: {dir_name}, copying {local_path} to {container_path}")
+
+            if local_path.exists():
+                print(f"Copying {local_path} to container at {container_path}")
+                copy_to_container(container_id, str(local_path), str(container_path), EXCLUDE_CUSTOM_NODE_DIRS)
+                if key == "custom_nodes":
+                    install_custom_nodes(container_id, BLACKLIST_REQUIREMENTS, EXCLUDE_CUSTOM_NODE_DIRS)
+                    installed_custom_nodes = True
+            else:
+                print(f"Local path does not exist: {local_path}")
+        if action == "mount":
+            if key == "custom_nodes":
+                install_custom_nodes(container_id, BLACKLIST_REQUIREMENTS, EXCLUDE_CUSTOM_NODE_DIRS)
+                installed_custom_nodes = True
+
+    return installed_custom_nodes
 
 def install_custom_nodes(container_id: str, blacklist: list = [], exclude_dirs: list = []):
     """Install custom nodes by executing pip install for each requirements.txt in the container."""
@@ -180,51 +241,76 @@ def restart_container(container_id: str):
 
 def check_comfyui_path(env: Environment):
     """Check if the ComfyUI path is valid and handle installation if needed."""
-    if not os.path.exists(env.comfyui_path):
+    comfyui_path = Path(env.comfyui_path)
+    
+    if not comfyui_path.exists():
         raise HTTPException(status_code=400, detail=f"ComfyUI path does not exist: {env.comfyui_path}.")
     
-    if not os.path.isdir(env.comfyui_path):
+    if not comfyui_path.is_dir():
         raise HTTPException(status_code=400, detail=f"ComfyUI path is not a directory: {env.comfyui_path}.")
     
-    if not env.comfyui_path.endswith("ComfyUI"):
-        comfyui_dir = os.path.join(env.comfyui_path, "ComfyUI")
-        if os.path.exists(comfyui_dir):
+    if not comfyui_path.name.endswith("ComfyUI"):
+        comfyui_dir = comfyui_path / "ComfyUI"
+        if comfyui_dir.exists():
             raise HTTPException(status_code=400, detail=f"Existing ComfyUI directory found at: {comfyui_dir}.")
         
         if env.options.get("install_comfyui"):
             try:
-                os.makedirs(comfyui_dir, exist_ok=True)
+                comfyui_dir.mkdir(parents=True, exist_ok=True)
                 branch = env.options.get("comfyui_release", "master")
-                repo = Repo.clone_from(f"https://github.com/comfyanonymous/ComfyUI.git", comfyui_dir, branch=branch)
+                repo = Repo.clone_from(f"https://github.com/comfyanonymous/ComfyUI.git", str(comfyui_dir), branch=branch)
                 if not repo or repo.is_dirty():
                     raise HTTPException(status_code=400, detail=f"Failed to clone ComfyUI repository to {comfyui_dir}.")
-                env.comfyui_path = comfyui_dir
+                env.comfyui_path = str(comfyui_dir)
             except Exception as e:
                 raise HTTPException(status_code=500, detail=f"Error during ComfyUI installation: {str(e)}")
         else:
             raise HTTPException(status_code=400, detail="ComfyUI installation is not enabled and no valid installation found.")
 
 def create_mounts(env: Environment):
-    """Create bind mounts for the container."""
+    """Create bind mounts for the container based on the mount configuration."""
     mounts = []
-    all_dirs_to_include = INCLUDE_USER_COMFYUI_DIRS + env.options.get("mount_additional_dirs", [])
-    
-    for dir_name in all_dirs_to_include:
-        if not os.path.exists(os.path.join(env.comfyui_path, dir_name)):
-            print(f"Directory does not exist: {dir_name}")
-            all_dirs_to_include.remove(dir_name)
 
-    for dir_name in all_dirs_to_include:
-        local_path = os.path.join(env.comfyui_path, dir_name)
-        container_path = posixpath.join(CONTAINER_COMFYUI_PATH, dir_name)
-        mounts.append(
-            Mount(
-                target=container_path,
-                source=local_path,
-                type='bind',
-                read_only=False,
+    # Mapping from config keywords to actual path names
+    path_mapping = {
+        "custom_nodes": "custom_nodes",
+        "user": "user",
+        "models": "models",
+        "output": "output",
+        "input": "input"
+    }
+
+    # Retrieve the mount configuration from the environment options
+    mount_config = env.options.get("mount_config", {})
+
+    comfyui_path = Path(env.comfyui_path)
+    for key, action in mount_config.items():
+        # Translate the config keyword to the actual path name
+        dir_name = path_mapping.get(key)
+        if not dir_name:
+            print(f"Unknown directory key: {key}")
+            dir_name = key
+
+        # Convert dir_name to a Path object
+        dir_path = comfyui_path / Path(dir_name)
+        if not dir_path.exists():
+            print(f"Directory does not exist: {dir_name}")
+            continue
+
+        # Only create a bind mount if the action is "mount"
+        if action == "mount":
+            container_path = (Path(CONTAINER_COMFYUI_PATH) / Path(dir_name)).as_posix()
+            mounts.append(
+                Mount(
+                    target=str(container_path),
+                    source=str(dir_path),
+                    type='bind',
+                    read_only=False,
+                )
             )
-        )
+        else:
+            print(f"Skipping mount for {dir_name} with action: {action}")
+
     return mounts
 
 def save_environment_to_db(environments, env, container_id, image):
@@ -478,16 +564,16 @@ def activate_environment(id: str, options: dict = {}):
         except docker.errors.APIError as e:
             raise HTTPException(status_code=400, detail=str(e))
     
-    local_custom_nodes_path = os.path.join(env.comfyui_path, "custom_nodes")
-    print(local_custom_nodes_path)
-    container_custom_nodes_path = CONTAINER_COMFYUI_PATH + "/custom_nodes"
-    print(container_custom_nodes_path)
-    if env.status == "created" and env.options.get("copy_custom_nodes") == "true":
-        print("copying and installing custom nodes")
-        copy_to_container(id, local_custom_nodes_path, container_custom_nodes_path, EXCLUDE_CUSTOM_NODE_DIRS)
-        install_custom_nodes(id, BLACKLIST_REQUIREMENTS, EXCLUDE_CUSTOM_NODE_DIRS)
-        restart_container(id)
-        
+    comfyui_path = Path(env.comfyui_path)
+    
+    # Check mount_config for directories to copy
+    mount_config = env.options.get("mount_config", {})
+
+    if env.status == "created":
+        installed_custom_nodes = copy_directories_to_container(id, comfyui_path, mount_config)
+        if installed_custom_nodes:
+            restart_container(id)
+
     env.status = "running"
     save_environments(environments)
     return {"status": "success", "container_id": id}
