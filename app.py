@@ -9,10 +9,10 @@ import uvicorn
 from git import Repo
 import posixpath
 import re
-
-app = FastAPI()
+from fastapi.middleware.cors import CORSMiddleware
 
 # Constants
+FRONTEND_ORIGIN = "http://localhost:8000"
 CONTAINER_COMFYUI_PATH = "/app/ComfyUI"
 SIGNAL_TIMEOUT = 2
 BLACKLIST_REQUIREMENTS = ['torch']
@@ -21,6 +21,17 @@ INCLUDE_USER_COMFYUI_DIRS = ['models', 'styles', 'input', 'output', 'user']
 COMFYUI_PORT = 8188
 DB_FILE = "environments.json"
 STOP_OTHER_RUNNING_CONTAINERS = True
+
+app = FastAPI()
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[FRONTEND_ORIGIN],  # Frontend's origin
+    allow_credentials=True,
+    allow_methods=["*"],  # Allow all HTTP methods (GET, POST, etc.)
+    allow_headers=["*"],  # Allow all headers
+)
 
 try: 
     client = docker.from_env()
@@ -235,15 +246,26 @@ def save_environment_to_db(environments, env, container_id, image):
 def create_environment(env: Environment):
     """Create a new Docker container and save to local database."""
     environments = load_environments()
-
-    if any(e["name"] == env.name for e in environments):
-        raise HTTPException(status_code=400, detail="Environment name already exists.")
-    
-    check_comfyui_path(env)
-    mounts = create_mounts(env)
-    combined_cmd = " --port " + str(COMFYUI_PORT) + " " + env.command
     
     try:
+        # Validate name only [a-zA-Z0-9][a-zA-Z0-9_.-] are allowed
+        if not re.match(r'[a-zA-Z0-9][a-zA-Z0-9_.-]', env.name):
+            raise HTTPException(status_code=400, detail="Environment name contains invalid characters. Only alphanumeric characters, dots, underscores, and hyphens are allowed. Minimum length is 2 characters.")
+
+        # Check if name is longer than 128 characters
+        if len(env.name) > 128:
+            raise HTTPException(status_code=400, detail="Environment name is too long. Maximum length is 128 characters.")
+
+        # Check if name already exists
+        if any(e["name"] == env.name for e in environments):
+            raise HTTPException(status_code=400, detail="Environment name already exists.")
+        
+        check_comfyui_path(env)
+        mounts = create_mounts(env)
+        
+        port = env.options.get("port", COMFYUI_PORT)
+        combined_cmd = " --port " + str(port) + " " + env.command
+        
         container = client.containers.create(
             image=env.image,
             name=env.name,
@@ -252,7 +274,7 @@ def create_environment(env: Environment):
             device_requests=[
                 DeviceRequest(count=-1, capabilities=[["gpu"]])
             ],
-            ports={f"{COMFYUI_PORT}": COMFYUI_PORT},
+            ports={f"{port}": port},
             mounts=mounts,
         )
         
@@ -260,17 +282,24 @@ def create_environment(env: Environment):
             raise HTTPException(status_code=500, detail="Failed to create Docker container.")
         
         env.metadata = {
-            "comfyui_version": env.options.get("comfyui_release", "master"),
             "base_image": env.image,
+            "port": port,
         }
 
         save_environment_to_db(environments, env, container.id, env.image)
         return {"status": "success", "container_id": container.id}
+
+    except HTTPException:
+        # Re-raise HTTPExceptions to ensure they are not caught by the generic exception handler
+        raise
     except docker.errors.APIError as e:
+        print(f"An API error occurred: {e}")
         raise HTTPException(status_code=400, detail=str(e))
     except docker.errors.ImageNotFound:
-        raise HTTPException(status_code=400, detail="Image not found. Please check the image name and try again.")
+        print("Image not found. Please check the image name and try again.")
+        raise HTTPException(status_code=404, detail="Image not found. Please check the image name and try again.")
     except Exception as e:
+        print(f"An error occurred: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -284,19 +313,31 @@ def duplicate_environment(id: str, env: Environment):
     
     environments = load_environments()
 
-    if any(e["name"] == env.name for e in environments):
-        raise HTTPException(status_code=400, detail="Environment name already exists.")
-    
-    prev_env = next((e for e in environments if e["id"] == id), None)
-    if prev_env is None:
-        raise HTTPException(status_code=404, detail="Environment not found.")
-    
-    if prev_env.get("status") == "created":
-        raise HTTPException(status_code=400, detail="An environment can only be duplicated after it has been activated at least once. Please activate the environment first.")
-    
-    new_container_name = env.name
-
     try:
+        # Validate name only [a-zA-Z0-9][a-zA-Z0-9_.-] are allowed
+        if not re.match(r'[a-zA-Z0-9][a-zA-Z0-9_.-]', env.name):
+            raise HTTPException(status_code=400, detail="Environment name contains invalid characters. Only alphanumeric characters, dots, underscores, and hyphens are allowed. Minimum length is 2 characters.")
+
+        # Check if name is longer than 128 characters
+        if len(env.name) > 128:
+            raise HTTPException(status_code=400, detail="Environment name is too long. Maximum length is 128 characters.")
+        
+        # Check if name already exists
+        if any(e["name"] == env.name for e in environments):
+            print(f"Environment name already exists: {env.name}")
+            raise HTTPException(status_code=400, detail="Environment name already exists.")
+        
+        prev_env = next((e for e in environments if e["id"] == id), None)
+        if prev_env is None:
+            print(f"Environment not found: {id}")
+            raise HTTPException(status_code=404, detail="Environment not found.")
+        
+        if prev_env.get("status") == "created":
+            print(f"Environment can only be duplicated after it has been activated at least once. Please activate the environment first.")
+            raise HTTPException(status_code=400, detail="An environment can only be duplicated after it has been activated at least once. Please activate the environment first.")
+        
+        new_container_name = env.name
+
         container = client.containers.get(id)
 
         try:
@@ -316,7 +357,8 @@ def duplicate_environment(id: str, env: Environment):
             print("No temporary backup image to remove.")
 
         mounts = create_mounts(env)
-        combined_cmd = " --port " + str(COMFYUI_PORT) + " " + env.command
+        port = env.options.get("port", COMFYUI_PORT)
+        combined_cmd = " --port " + str(port) + " " + env.command
 
         new_container = client.containers.create(
             image=latest_tag,
@@ -326,16 +368,20 @@ def duplicate_environment(id: str, env: Environment):
             device_requests=[
                 DeviceRequest(count=-1, capabilities=[["gpu"]])
             ],
-            ports={f"{COMFYUI_PORT}": COMFYUI_PORT},
+            ports={f"{port}": port},
             mounts=mounts,
         )
         print(f"New container '{new_container_name}' with id '{new_container.id}' created from the image.")
         
         env.metadata = prev_env.get("metadata", {})
+        env.metadata["port"] = port
 
         save_environment_to_db(environments, env, new_container.id, latest_tag)
         return {"status": "success", "container_id": new_container.id}
 
+    except HTTPException:
+        # Re-raise HTTPExceptions to ensure they are not caught by the generic exception handler
+        raise
     except docker.errors.NotFound:
         raise HTTPException(status_code=404, detail="Container not found.")
     except docker.errors.APIError as e:
@@ -349,6 +395,9 @@ def duplicate_environment(id: str, env: Environment):
         except docker.errors.ImageNotFound:
             print("No backup available to restore.")
         raise
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/environments")
@@ -433,7 +482,7 @@ def activate_environment(id: str, options: dict = {}):
     print(local_custom_nodes_path)
     container_custom_nodes_path = CONTAINER_COMFYUI_PATH + "/custom_nodes"
     print(container_custom_nodes_path)
-    if env.status == "created" and env.options.get("copy_custom_nodes"):
+    if env.status == "created" and env.options.get("copy_custom_nodes") == "true":
         print("copying and installing custom nodes")
         copy_to_container(id, local_custom_nodes_path, container_custom_nodes_path, EXCLUDE_CUSTOM_NODE_DIRS)
         install_custom_nodes(id, BLACKLIST_REQUIREMENTS, EXCLUDE_CUSTOM_NODE_DIRS)
