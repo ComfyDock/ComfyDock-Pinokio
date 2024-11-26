@@ -366,15 +366,16 @@ def create_environment(env: Environment):
         combined_cmd = " --port " + str(port) + " " + env.command
         
         runtime = "nvidia" if env.options.get("runtime", "") == "nvidia" else None
+        device_requests = [DeviceRequest(count=-1, capabilities=[["gpu"]])] if runtime else None
+        print(f"runtime: {runtime}")
+        print(f"device_requests: {device_requests}")
         
         container = client.containers.create(
             image=env.image,
             name=env.name,
             command=combined_cmd,
             runtime=runtime,
-            device_requests=[
-                DeviceRequest(count=-1, capabilities=[["gpu"]])
-            ],
+            device_requests=device_requests,
             ports={f"{port}": port},
             mounts=mounts,
         )
