@@ -271,6 +271,7 @@ def check_comfyui_path(env: Environment):
 
 def create_mounts(env: Environment):
     """Create bind mounts for the container based on the mount configuration."""
+    print(f"Creating mounts for environment: {env.name}")
     mounts = []
 
     # Mapping from config keywords to actual path names
@@ -283,11 +284,15 @@ def create_mounts(env: Environment):
     }
 
     # Retrieve the mount configuration from the environment options
-    try:
-        mount_config = json.loads(env.options.get("mount_config", "{}"))
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail="Invalid mount configuration. Please ensure it is valid JSON.")
-    
+    # try:
+    #     print(f"env.options: {env.options}")
+    #     mount_config = json.loads(env.options.get("mount_config", "{}"))
+    #     print(f"mount_config: {mount_config}")
+    # except json.JSONDecodeError:
+    #     raise HTTPException(status_code=400, detail="Invalid mount configuration. Please ensure it is valid JSON.")
+    # except Exception as e:
+    #     raise HTTPException(status_code=400, detail=str(e))
+    mount_config = env.options.get("mount_config", "{}")
     print(f'mount_config: {mount_config}')
     print(f'type of mount_config: {type(mount_config)}')
 
@@ -356,22 +361,24 @@ def create_environment(env: Environment):
         
         check_comfyui_path(env)
         mounts = create_mounts(env)
-        
+        print(f"Mounts: {mounts}")
         port = env.options.get("port", COMFYUI_PORT)
         combined_cmd = " --port " + str(port) + " " + env.command
+        
+        runtime = "nvidia" if env.options.get("runtime", "") == "nvidia" else None
         
         container = client.containers.create(
             image=env.image,
             name=env.name,
             command=combined_cmd,
-            runtime=env.options.get("runtime", ""),
+            runtime=runtime,
             device_requests=[
                 DeviceRequest(count=-1, capabilities=[["gpu"]])
             ],
             ports={f"{port}": port},
             mounts=mounts,
         )
-        
+        print(f"Container: {container}")
         if not container:
             raise HTTPException(status_code=500, detail="Failed to create Docker container.")
         
@@ -575,10 +582,7 @@ def activate_environment(id: str, options: dict = {}):
     comfyui_path = Path(env.comfyui_path)
     
     # Check mount_config for directories to copy
-    try:
-        mount_config = json.loads(env.options.get("mount_config", "{}"))
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail="Invalid mount configuration. Please ensure it is valid JSON.")
+    mount_config = env.options.get("mount_config", "{}")
 
     if env.status == "created":
         installed_custom_nodes = copy_directories_to_container(id, comfyui_path, mount_config)
