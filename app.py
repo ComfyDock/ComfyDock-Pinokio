@@ -364,7 +364,7 @@ def create_environment(env: Environment):
             image=env.image,
             name=env.name,
             command=combined_cmd,
-            runtime="nvidia",
+            runtime=env.options.get("runtime", ""),
             device_requests=[
                 DeviceRequest(count=-1, capabilities=[["gpu"]])
             ],
