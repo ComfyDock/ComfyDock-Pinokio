@@ -13,6 +13,7 @@ import re
 from fastapi.middleware.cors import CORSMiddleware
 from pathlib import Path
 import tempfile
+from fastapi.responses import StreamingResponse
 
 # Constants
 FRONTEND_ORIGIN = "http://localhost:8000"
@@ -79,9 +80,12 @@ class Environment(BaseModel):
     status: str = ""
     command: str = ""
     comfyui_path: str = ""
+    duplicate: bool = False
     options: dict = {}
     metadata: dict = {}
 
+class EnvironmentUpdate(BaseModel):
+    name: str = None
 
 def ensure_directory_exists(container, path):
     """Ensure that a directory exists in the container."""
@@ -240,34 +244,41 @@ def restart_container(container_id: str):
         container.restart(timeout=SIGNAL_TIMEOUT)
     except docker.errors.APIError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    
+def try_install_comfyui(path: str, branch: str = "master"):
+    try:
+        check_comfyui_path(path)
+    except HTTPException as e:
+        if e.detail != "No valid ComfyUI installation found.":
+            raise e
+    print(f"Installing ComfyUI from {path} with branch {branch}")
+    comfyui_path = Path(path)
+    try:
+        comfyui_dir = comfyui_path / "ComfyUI"
+        comfyui_dir.mkdir(parents=True, exist_ok=True)
+        repo = Repo.clone_from(f"https://github.com/comfyanonymous/ComfyUI.git", str(comfyui_dir), branch=branch)
+        if not repo or repo.is_dirty():
+            raise HTTPException(status_code=400, detail=f"Failed to clone ComfyUI repository to {comfyui_dir}.")
+        return str(comfyui_dir)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error during ComfyUI installation: {str(e)}")
 
-def check_comfyui_path(env: Environment):
+def check_comfyui_path(path: str):
     """Check if the ComfyUI path is valid and handle installation if needed."""
-    comfyui_path = Path(env.comfyui_path)
+    comfyui_path = Path(path)
     
     if not comfyui_path.exists():
-        raise HTTPException(status_code=400, detail=f"ComfyUI path does not exist: {env.comfyui_path}.")
+        raise HTTPException(status_code=400, detail=f"ComfyUI path does not exist: {path}.")
     
     if not comfyui_path.is_dir():
-        raise HTTPException(status_code=400, detail=f"ComfyUI path is not a directory: {env.comfyui_path}.")
+        raise HTTPException(status_code=400, detail=f"ComfyUI path is not a directory: {path}.")
     
     if not comfyui_path.name.endswith("ComfyUI"):
         comfyui_dir = comfyui_path / "ComfyUI"
         if comfyui_dir.exists():
             raise HTTPException(status_code=400, detail=f"Existing ComfyUI directory found at: {comfyui_dir}.")
         
-        if env.options.get("install_comfyui"):
-            try:
-                comfyui_dir.mkdir(parents=True, exist_ok=True)
-                branch = env.options.get("comfyui_release", "master")
-                repo = Repo.clone_from(f"https://github.com/comfyanonymous/ComfyUI.git", str(comfyui_dir), branch=branch)
-                if not repo or repo.is_dirty():
-                    raise HTTPException(status_code=400, detail=f"Failed to clone ComfyUI repository to {comfyui_dir}.")
-                env.comfyui_path = str(comfyui_dir)
-            except Exception as e:
-                raise HTTPException(status_code=500, detail=f"Error during ComfyUI installation: {str(e)}")
-        else:
-            raise HTTPException(status_code=400, detail="ComfyUI installation is not enabled and no valid installation found.")
+        raise HTTPException(status_code=400, detail="No valid ComfyUI installation found.")
 
 def create_mounts(env: Environment):
     """Create bind mounts for the container based on the mount configuration."""
@@ -284,14 +295,6 @@ def create_mounts(env: Environment):
     }
 
     # Retrieve the mount configuration from the environment options
-    # try:
-    #     print(f"env.options: {env.options}")
-    #     mount_config = json.loads(env.options.get("mount_config", "{}"))
-    #     print(f"mount_config: {mount_config}")
-    # except json.JSONDecodeError:
-    #     raise HTTPException(status_code=400, detail="Invalid mount configuration. Please ensure it is valid JSON.")
-    # except Exception as e:
-    #     raise HTTPException(status_code=400, detail=str(e))
     mount_config = env.options.get("mount_config", "{}")
     print(f'mount_config: {mount_config}')
     print(f'type of mount_config: {type(mount_config)}')
@@ -326,7 +329,7 @@ def create_mounts(env: Environment):
 
     return mounts
 
-def save_environment_to_db(environments, env, container_id, image):
+def save_environment_to_db(environments, env, container_id, image, is_duplicate: bool = False):
     """Save the environment details to the database."""
     new_env = {
         "name": env.name,
@@ -335,6 +338,7 @@ def save_environment_to_db(environments, env, container_id, image):
         "id": container_id,
         "comfyui_path": env.comfyui_path,
         "command": env.command,
+        "duplicate": is_duplicate,
         "options": env.options,
         "metadata": env.metadata,
     }
@@ -359,7 +363,7 @@ def create_environment(env: Environment):
         if any(e["name"] == env.name for e in environments):
             raise HTTPException(status_code=400, detail="Environment name already exists.")
         
-        check_comfyui_path(env)
+        check_comfyui_path(env.comfyui_path)
         mounts = create_mounts(env)
         print(f"Mounts: {mounts}")
         port = env.options.get("port", COMFYUI_PORT)
@@ -386,6 +390,7 @@ def create_environment(env: Environment):
         env.metadata = {
             "base_image": env.image,
             "port": port,
+            "created_at": time.time(),
         }
 
         save_environment_to_db(environments, env, container.id, env.image)
@@ -477,8 +482,9 @@ def duplicate_environment(id: str, env: Environment):
         
         env.metadata = prev_env.get("metadata", {})
         env.metadata["port"] = port
+        env.metadata["created_at"] = time.time()
 
-        save_environment_to_db(environments, env, new_container.id, latest_tag)
+        save_environment_to_db(environments, env, new_container.id, latest_tag, is_duplicate=True)
         return {"status": "success", "container_id": new_container.id}
 
     except HTTPException:
@@ -545,6 +551,28 @@ def get_environment_status(name: str):
     env = next((e for e in environments if e["name"] == name), None)
     return {"status": env["status"]}
 
+@app.put("/environments/{id}")
+def update_environment(id: str, env: EnvironmentUpdate):
+    """Update an environment in the local database."""
+    environments = load_environments()
+    existing_env = next((e for e in environments if e["id"] == id), None)
+    if existing_env is None:
+        raise HTTPException(status_code=404, detail="Environment not found.")
+    
+    # Update the environment name
+    if env.name is not None:
+        if any(e["name"] == env.name for e in environments):
+            raise HTTPException(status_code=400, detail="Environment name already exists.")
+        # Try renaming the container:
+        try:
+            container = client.containers.get(existing_env["id"])
+            container.rename(env.name)
+        except docker.errors.APIError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        existing_env["name"] = env.name
+    
+    save_environments(environments)
+    return {"status": "success", "container_id": id}
 
 @app.post("/environments/{id}/activate")
 def activate_environment(id: str, options: dict = {}):
@@ -616,6 +644,32 @@ def deactivate_environment(id: str):
     save_environments(environments)
     return {"status": "success", "container_id": id}
 
+@app.post("/install-comfyui")
+def install_comfyui(obj: dict):
+    """Install ComfyUI at given path."""
+    print(obj)
+    try_install_comfyui(obj["path"], obj["branch"])
+    return {"status": "success"}
+
+@app.get("/environments/{id}/logs")
+def stream_container_logs(id: str):
+    """Stream logs from a running Docker container."""
+    try:
+        container = client.containers.get(id)
+    except docker.errors.NotFound:
+        raise HTTPException(status_code=404, detail="Container not found.")
+    except docker.errors.APIError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    if container.status != "running":
+        raise HTTPException(status_code=400, detail="Container is not running.")
+
+    def log_generator():
+        for log in container.logs(stream=True):
+            decoded_log = log.decode('utf-8')
+            yield f"data: {decoded_log}\n\n"
+
+    return StreamingResponse(log_generator(), media_type="text/event-stream")
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=5172)
