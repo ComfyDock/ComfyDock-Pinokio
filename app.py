@@ -6,16 +6,23 @@ import uvicorn
 from fastapi.middleware.cors import CORSMiddleware
 from pathlib import Path
 from fastapi.responses import StreamingResponse
+import argparse
 
 from utils.comfyui_utils import check_comfyui_path, try_install_comfyui
 from utils.docker_utils import copy_directories_to_container, create_container, create_mounts, get_container, get_image, remove_image, restart_container
 from utils.environment_manager import Environment, EnvironmentUpdate, check_environment_name, load_environments, save_environment_to_db, save_environments
+from utils.user_settings_manager import UserSettings, load_user_settings, update_user_settings
 
 # Constants
 FRONTEND_ORIGIN = "http://localhost:8000"
 SIGNAL_TIMEOUT = 2
 COMFYUI_PORT = 8188
 STOP_OTHER_RUNNING_CONTAINERS = True
+
+# Parse command-line arguments
+parser = argparse.ArgumentParser(description="Run the FastAPI app with optional ComfyUI path.")
+parser.add_argument("--comfyui_path", type=str, help="Default ComfyUI path")
+args = parser.parse_args()
 
 app = FastAPI()
 
@@ -347,6 +354,18 @@ def deactivate_environment(id: str):
         print(f"An error occurred: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/user-settings")
+def get_user_settings():
+    """Get user settings."""
+    default_comfyui_path = args.comfyui_path if args.comfyui_path else ""
+    return load_user_settings(default_comfyui_path)
+
+@app.put("/user-settings")
+def update_user(settings: UserSettings):
+    """Update user settings."""
+    print(settings)
+    update_user_settings(settings.model_dump())
+    return {"status": "success"}
 
 @app.post("/install-comfyui")
 def install_comfyui(obj: dict):

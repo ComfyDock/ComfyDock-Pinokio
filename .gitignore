@@ -2,3 +2,8 @@ cache/
 env/
 ENVIRONMENT
 environments.json
+user.settings.json
+*.pyc
+*.pyd
+*.pyo
+*.pyz
