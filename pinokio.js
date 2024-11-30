@@ -4,16 +4,20 @@ module.exports = {
   icon: "icon.png",
   menu: [
     {
+      text: "Get Docker",
+      href: "https://www.docker.com/products/docker-desktop/",
+    },
+    {
       text: "Install",
-      href: "scripts/install.json",
+      href: "install.json",
     },
     {
       text: "Start",
-      href: "scripts/start.json",
+      href: "start.json",
     },
     {
       text: "Show Environments",
-      href: "http://localhost:5173",
+      href: "http://localhost:8000",
     },
     {
       text: "ComfyUI",

@@ -22,6 +22,7 @@ STOP_OTHER_RUNNING_CONTAINERS = True
 # Parse command-line arguments
 parser = argparse.ArgumentParser(description="Run the FastAPI app with optional ComfyUI path.")
 parser.add_argument("--comfyui_path", type=str, help="Default ComfyUI path")
+parser.add_argument("--allow_running_multiple_containers", type=str, help="Allow running multiple containers", default="False")
 args = parser.parse_args()
 
 app = FastAPI()
@@ -278,7 +279,8 @@ def activate_environment(id: str, options: dict = {}):
         container = get_container(env.id)
         
         # Stop all other running containers if they exist:
-        if STOP_OTHER_RUNNING_CONTAINERS:
+        print(args.allow_running_multiple_containers)
+        if args.allow_running_multiple_containers != "True":
             for e in environments:
                 if e["id"] != id and e["status"] == "running":
                     try:
