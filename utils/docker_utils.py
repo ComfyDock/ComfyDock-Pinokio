@@ -84,8 +84,29 @@ def remove_container(container):
         container.remove()
     except APIError as e:
         raise e
-  
-  
+
+def pull_image_api(image):
+    try:
+        # Use the Docker API to pull the image and stream the response
+        pull_stream = client.api.pull(image, stream=True, decode=True)
+        for line in pull_stream:
+            yield line
+    except APIError as e:
+        raise e
+
+def try_pull_image(image):
+    # Check if the image is available locally, if not, pull it from Docker Hub
+    try:
+        client.images.get(image)
+        print(f"Image {image} found locally.")
+    except docker.errors.ImageNotFound:
+        print(f"Image {image} not found locally. Pulling from Docker Hub...")
+        client.images.pull(image)
+        print(f"Image {image} successfully pulled from Docker Hub.")
+    except APIError as e:
+        print(f"Error pulling image {image}: {e}")
+        raise e
+
 def ensure_directory_exists(container, path):
     """Ensure that a directory exists in the container."""
     try:
@@ -288,5 +309,15 @@ def create_mounts(name: str, mount_config: dict, comfyui_path: Path):
             )
         else:
             print(f"Skipping mount for {dir_name} with action: {action}")
+            
+    # Now we want to add one more mandatory mount for /usr/lib/wsl:/usr/lib/wsl
+    mounts.append(
+        Mount(
+            target="/usr/lib/wsl",
+            source="/usr/lib/wsl",
+            type='bind',
+            read_only=True,
+        )
+    )
 
     return mounts

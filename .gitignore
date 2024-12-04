@@ -7,3 +7,4 @@ user.settings.json
 *.pyd
 *.pyo
 *.pyz
+utils/__pycache__

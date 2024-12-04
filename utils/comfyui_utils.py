@@ -1,6 +1,6 @@
-from git import Repo
 from fastapi import HTTPException
 from pathlib import Path
+import subprocess
 
 
 def try_install_comfyui(path: str, branch: str = "master"):
@@ -14,10 +14,21 @@ def try_install_comfyui(path: str, branch: str = "master"):
     try:
         comfyui_dir = comfyui_path / "ComfyUI"
         comfyui_dir.mkdir(parents=True, exist_ok=True)
-        repo = Repo.clone_from(f"https://github.com/comfyanonymous/ComfyUI.git", str(comfyui_dir), branch=branch)
-        if not repo or repo.is_dirty():
-            raise HTTPException(status_code=400, detail=f"Failed to clone ComfyUI repository to {comfyui_dir}.")
+        
+        # Use subprocess to run the git clone command
+        clone_command = [
+            "git", "clone",
+            "--branch", branch,
+            "https://github.com/comfyanonymous/ComfyUI.git",
+            str(comfyui_dir)
+        ]
+        result = subprocess.run(clone_command, check=True, capture_output=True, text=True)
+        print(result.stdout)
+        
         return str(comfyui_dir)
+    except subprocess.CalledProcessError as e:
+        print(f"Error during git clone: {e.stderr}")
+        raise HTTPException(status_code=400, detail=f"Failed to clone ComfyUI repository to {comfyui_dir}.")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error during ComfyUI installation: {str(e)}")
 

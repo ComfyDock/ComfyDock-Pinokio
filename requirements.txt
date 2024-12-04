@@ -2,4 +2,3 @@ fastapi[all]
 pydantic
 docker
 uvicorn
-gitpython

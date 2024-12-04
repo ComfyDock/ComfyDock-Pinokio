@@ -1,5 +1,6 @@
+import json
 import time
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 import docker
 from docker.types import DeviceRequest
 import uvicorn
@@ -7,9 +8,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from pathlib import Path
 from fastapi.responses import StreamingResponse
 import argparse
+import requests
 
 from utils.comfyui_utils import check_comfyui_path, try_install_comfyui
-from utils.docker_utils import copy_directories_to_container, create_container, create_mounts, get_container, get_image, remove_image, restart_container
+from utils.docker_utils import copy_directories_to_container, create_container, create_mounts, get_container, get_image, pull_image_api, remove_image, restart_container, try_pull_image
 from utils.environment_manager import Environment, EnvironmentUpdate, check_environment_name, load_environments, save_environment_to_db, save_environments
 from utils.user_settings_manager import UserSettings, load_user_settings, update_user_settings
 
@@ -17,7 +19,6 @@ from utils.user_settings_manager import UserSettings, load_user_settings, update
 FRONTEND_ORIGIN = "http://localhost:8000"
 SIGNAL_TIMEOUT = 2
 COMFYUI_PORT = 8188
-STOP_OTHER_RUNNING_CONTAINERS = True
 
 # Parse command-line arguments
 parser = argparse.ArgumentParser(description="Run the FastAPI app with optional ComfyUI path.")
@@ -48,6 +49,9 @@ def create_environment(env: Environment):
         
         # Check ComfyUI path is valid
         check_comfyui_path(env.comfyui_path)
+        
+        # Check if the image is available locally, if not, pull it from Docker Hub
+        try_pull_image(env.image)
         
         # Create mounts
         mounts = create_mounts(env.name, env.options.get("mount_config", {}), Path(env.comfyui_path))
@@ -368,6 +372,86 @@ def update_user(settings: UserSettings):
     print(settings)
     update_user_settings(settings.model_dump())
     return {"status": "success"}
+
+@app.get("/images/tags")
+def get_image_tags():
+    """Get all available image tags from Docker Hub."""
+    try:
+        response = requests.get(
+            "https://hub.docker.com/v2/namespaces/akatzai/repositories/comfyui-env/tags?page_size=100"
+        )
+        response.raise_for_status()  # Raise an error for bad responses
+        data = response.json()
+        tags = [tag['name'] for tag in data.get('results', [])]
+        return {"tags": tags}
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching tags from Docker Hub: {e}")
+        raise HTTPException(status_code=500, detail="Error fetching tags from Docker Hub")
+
+@app.get("/images/exists")
+def check_image(image: str = Query(..., description="The name of the Docker image to check")):
+    print(image)
+    try:
+        get_image(image)
+        return {"status": "found"}
+    except docker.errors.ImageNotFound:
+        raise HTTPException(status_code=404, detail="Image not found locally. Ready to pull.")
+    
+@app.get("/images/pull")
+def pull_image(image: str = Query(..., description="The name of the Docker image to pull")):
+    def image_pull_stream():
+        layers = {}
+        total_download_size = 0
+        total_downloaded = 0
+        completed_layers = set()
+        already_exist_layers = set()
+
+        try:
+            # Start pulling the image
+            for line in pull_image_api(image):
+                # Send raw line for debugging (optional)
+                # yield f"data: {json.dumps(line)}\n\n"
+
+                status = line.get('status')
+                layer_id = line.get('id')
+                progress_detail = line.get('progressDetail', {})
+
+                if layer_id:
+                    if status == "Pull complete":
+                        completed_layers.add(layer_id)
+                    elif status == "Already exists":
+                        already_exist_layers.add(layer_id)
+                    elif 'current' in progress_detail and 'total' in progress_detail:
+                        current = progress_detail.get('current', 0)
+                        total = progress_detail.get('total', 0)
+
+                        if total > 0:
+                            if layer_id not in layers:
+                                layers[layer_id] = {'current': current, 'total': total}
+                                total_download_size += total
+                                total_downloaded += current
+                            else:
+                                total_downloaded -= layers[layer_id]['current']
+                                layers[layer_id]['current'] = current
+                                total_downloaded += current
+
+                        # Compute overall progress
+                        if total_download_size > 0:
+                            overall_progress = (total_downloaded / total_download_size) * 100
+                        else:
+                            overall_progress = 0
+
+                        # Send progress update
+                        yield f"data: {json.dumps({'progress': overall_progress})}\n\n"
+
+            # When done, send completion status
+            yield f"data: {json.dumps({'progress': 100, 'status': 'completed'})}\n\n"
+
+        except docker.errors.APIError as e:
+            error_message = f"Error pulling image {image}: {e}"
+            yield f"data: {json.dumps({'error': error_message})}\n\n"
+
+    return StreamingResponse(image_pull_stream(), media_type="text/event-stream")
 
 @app.post("/install-comfyui")
 def install_comfyui(obj: dict):
