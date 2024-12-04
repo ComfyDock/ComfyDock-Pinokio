@@ -1,26 +1,30 @@
-import tarfile
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-import docker
-from docker.types import Mount, DeviceRequest
 import json
-import os
+import time
+from fastapi import FastAPI, HTTPException, Query
+import docker
+from docker.types import DeviceRequest
 import uvicorn
-from git import Repo
-import posixpath
-import re
 from fastapi.middleware.cors import CORSMiddleware
+from pathlib import Path
+from fastapi.responses import StreamingResponse
+import argparse
+import requests
+
+from utils.comfyui_utils import check_comfyui_path, try_install_comfyui
+from utils.docker_utils import copy_directories_to_container, create_container, create_mounts, get_container, get_image, pull_image_api, remove_image, restart_container, try_pull_image
+from utils.environment_manager import Environment, EnvironmentUpdate, check_environment_name, load_environments, save_environment_to_db, save_environments
+from utils.user_settings_manager import UserSettings, load_user_settings, update_user_settings
 
 # Constants
 FRONTEND_ORIGIN = "http://localhost:8000"
-CONTAINER_COMFYUI_PATH = "/app/ComfyUI"
 SIGNAL_TIMEOUT = 2
-BLACKLIST_REQUIREMENTS = ['torch']
-EXCLUDE_CUSTOM_NODE_DIRS = ['__pycache__', 'ComfyUI-Manager']
-INCLUDE_USER_COMFYUI_DIRS = ['models', 'styles', 'input', 'output', 'user']
 COMFYUI_PORT = 8188
-DB_FILE = "environments.json"
-STOP_OTHER_RUNNING_CONTAINERS = True
+
+# Parse command-line arguments
+parser = argparse.ArgumentParser(description="Run the FastAPI app with optional ComfyUI path.")
+parser.add_argument("--comfyui_path", type=str, help="Default ComfyUI path")
+parser.add_argument("--allow_running_multiple_containers", type=str, help="Allow running multiple containers", default="False")
+args = parser.parse_args()
 
 app = FastAPI()
 
@@ -33,257 +37,48 @@ app.add_middleware(
     allow_headers=["*"],  # Allow all headers
 )
 
-try: 
-    client = docker.from_env()
-except docker.errors.DockerException:
-    raise HTTPException(status_code=500, detail="Failed to connect to Docker. Please ensure your Docker client is running.")
-
-
-def save_environments(data):
-    with open(DB_FILE, "w") as f:
-        json.dump(data, f, indent=4)
-
-# Helper function to load and save JSON data
-def load_environments():
-    environments = []
-    if os.path.exists(DB_FILE):
-        with open(DB_FILE, "r") as f:
-            environments = json.load(f)
-    
-    # Query the database for the status of each container and ensure they match the status in the database
-    for env in environments:
-        try:
-            container = client.containers.get(env["id"])
-        except docker.errors.NotFound:
-            env["status"] = "dead"
-        except Exception as e:
-            return HTTPException(status_code=500, detail=str(e))
-        else:
-            env["status"] = container.status
-            
-    # save the updated statuses
-    save_environments(environments)
-    
-    return environments
-
-
-
-# Pydantic model for environment creation
-class Environment(BaseModel):
-    name: str
-    image: str
-    id: str = ""
-    status: str = ""
-    command: str = ""
-    comfyui_path: str = ""
-    options: dict = {}
-    metadata: dict = {}
-
-
-def copy_to_container(container_id: str, source_path: str, container_path: str, exclude_dirs: list = []):
-    container = client.containers.get(container_id)
-
-    # Create a tar archive of the source directory or file
-    with tarfile.open("archive.tar", mode="w") as archive:
-        # Add each file in the source directory to the archive
-        for root, dirs, files in os.walk(source_path):
-            # Modify dirs in-place to exclude specified directories
-            dirs[:] = [d for d in dirs if d not in exclude_dirs]
-            for file in files:
-                full_path = os.path.join(root, file)
-                # Calculate the relative path to maintain the directory structure
-                relative_path = os.path.relpath(full_path, start=source_path)
-                archive.add(full_path, arcname=relative_path)
-
-    # Send the tar archive to the container
-    with open("archive.tar", "rb") as tar_data:
-        container.put_archive(container_path, tar_data)
-
-    # Clean up the tar archive
-    os.remove("archive.tar")
-    print(f"Copied {source_path} to {container_id}:{container_path}")
-
-
-def install_custom_nodes(container_id: str, blacklist: list = [], exclude_dirs: list = []):
-    """Install custom nodes by executing pip install for each requirements.txt in the container."""
-
-    container_custom_nodes_path = CONTAINER_COMFYUI_PATH + "/custom_nodes"
-    container = client.containers.get(container_id)
-
-    # Construct the find command with exclusions
-    exclude_conditions = ' '.join(f"-not -name '{dir_name}'" for dir_name in exclude_dirs)
-    exec_command = f"sh -c 'find {container_custom_nodes_path} -mindepth 1 -maxdepth 1 -type d {exclude_conditions}'"
-    exec_id = container.exec_run(exec_command, stdout=True, stderr=True, stream=True)
-
-    # Collect output from the stream
-    output = []
-    print("Listing directories in custom_nodes path:")
-    for line in exec_id.output:
-        decoded_line = line.decode('utf-8').strip()
-        print(decoded_line)  # Print each directory name
-        output.append(decoded_line)
-    output = '\n'.join(output).split('\n') if output else []
-    print(output)
-
-    for custom_node in output:
-        print(f"Checking {custom_node}")
-        requirements_path = posixpath.join(container_custom_nodes_path, custom_node, "requirements.txt")
-        
-        # Check if requirements.txt exists in the custom node directory
-        check_command = f"sh -c '[ -f {requirements_path} ] && echo exists || echo not_exists'"
-        check_exec_id = container.exec_run(check_command, stdout=True, stderr=True)
-        if check_exec_id.output.decode('utf-8').strip() == "exists":
-            print(f"Found requirements.txt in {custom_node}, checking for blacklisted dependencies...")
-
-            # Read the requirements.txt file content
-            read_command = f"sh -c 'cat {requirements_path}'"
-            read_exec_id = container.exec_run(read_command, stdout=True, stderr=True)
-            requirements_content = read_exec_id.output.decode('utf-8').strip().split('\n')
-
-            # Filter out blacklisted dependencies
-            filtered_requirements = []
-            for line in requirements_content:
-                # Extract the package name using regex
-                match = re.match(r'^\s*([a-zA-Z0-9\-_]+)', line)
-                if match:
-                    package_name = match.group(1)
-                    if package_name in blacklist:
-                        print(f"Skipping blacklisted dependency: {line}")
-                        continue
-                filtered_requirements.append(line)
-
-            # If there are any non-blacklisted dependencies, create a temporary requirements file
-            if filtered_requirements:
-                temp_requirements_path = posixpath.join(container_custom_nodes_path, custom_node, "temp_requirements.txt")
-                create_temp_command = f"sh -c 'echo \"{chr(10).join(filtered_requirements)}\" > {temp_requirements_path}'"
-                container.exec_run(create_temp_command, stdout=True, stderr=True)
-
-                # Run pip install for the filtered requirements
-                print(f"Installing non-blacklisted dependencies for {custom_node}...")
-                install_command = f"sh -c 'pip install -r {temp_requirements_path}'"
-                install_exec_id = container.exec_run(install_command, stdout=True, stderr=True, stream=True)
-                for line in install_exec_id.output:
-                    print(line.decode('utf-8').strip())  # Print the output of the pip install command
-
-                # Remove the temporary requirements file
-                remove_temp_command = f"sh -c 'rm {temp_requirements_path}'"
-                container.exec_run(remove_temp_command, stdout=True, stderr=True)
-        else:
-            print(f"No requirements.txt found in {custom_node}.")
-
-def restart_container(container_id: str):
-    container = client.containers.get(container_id)
-    try:
-        container.restart(timeout=SIGNAL_TIMEOUT)
-    except docker.errors.APIError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-def check_comfyui_path(env: Environment):
-    """Check if the ComfyUI path is valid and handle installation if needed."""
-    if not os.path.exists(env.comfyui_path):
-        raise HTTPException(status_code=400, detail=f"ComfyUI path does not exist: {env.comfyui_path}.")
-    
-    if not os.path.isdir(env.comfyui_path):
-        raise HTTPException(status_code=400, detail=f"ComfyUI path is not a directory: {env.comfyui_path}.")
-    
-    if not env.comfyui_path.endswith("ComfyUI"):
-        comfyui_dir = os.path.join(env.comfyui_path, "ComfyUI")
-        if os.path.exists(comfyui_dir):
-            raise HTTPException(status_code=400, detail=f"Existing ComfyUI directory found at: {comfyui_dir}.")
-        
-        if env.options.get("install_comfyui"):
-            try:
-                os.makedirs(comfyui_dir, exist_ok=True)
-                branch = env.options.get("comfyui_release", "master")
-                repo = Repo.clone_from(f"https://github.com/comfyanonymous/ComfyUI.git", comfyui_dir, branch=branch)
-                if not repo or repo.is_dirty():
-                    raise HTTPException(status_code=400, detail=f"Failed to clone ComfyUI repository to {comfyui_dir}.")
-                env.comfyui_path = comfyui_dir
-            except Exception as e:
-                raise HTTPException(status_code=500, detail=f"Error during ComfyUI installation: {str(e)}")
-        else:
-            raise HTTPException(status_code=400, detail="ComfyUI installation is not enabled and no valid installation found.")
-
-def create_mounts(env: Environment):
-    """Create bind mounts for the container."""
-    mounts = []
-    all_dirs_to_include = INCLUDE_USER_COMFYUI_DIRS + env.options.get("mount_additional_dirs", [])
-    
-    for dir_name in all_dirs_to_include:
-        if not os.path.exists(os.path.join(env.comfyui_path, dir_name)):
-            print(f"Directory does not exist: {dir_name}")
-            all_dirs_to_include.remove(dir_name)
-
-    for dir_name in all_dirs_to_include:
-        local_path = os.path.join(env.comfyui_path, dir_name)
-        container_path = posixpath.join(CONTAINER_COMFYUI_PATH, dir_name)
-        mounts.append(
-            Mount(
-                target=container_path,
-                source=local_path,
-                type='bind',
-                read_only=False,
-            )
-        )
-    return mounts
-
-def save_environment_to_db(environments, env, container_id, image):
-    """Save the environment details to the database."""
-    new_env = {
-        "name": env.name,
-        "image": image,
-        "status": "created",
-        "id": container_id,
-        "comfyui_path": env.comfyui_path,
-        "command": env.command,
-        "options": env.options,
-        "metadata": env.metadata,
-    }
-    environments.append(new_env)
-    save_environments(environments)
-
+# Routes
 @app.post("/environments")
 def create_environment(env: Environment):
     """Create a new Docker container and save to local database."""
     environments = load_environments()
     
     try:
-        # Validate name only [a-zA-Z0-9][a-zA-Z0-9_.-] are allowed
-        if not re.match(r'[a-zA-Z0-9][a-zA-Z0-9_.-]', env.name):
-            raise HTTPException(status_code=400, detail="Environment name contains invalid characters. Only alphanumeric characters, dots, underscores, and hyphens are allowed. Minimum length is 2 characters.")
-
-        # Check if name is longer than 128 characters
-        if len(env.name) > 128:
-            raise HTTPException(status_code=400, detail="Environment name is too long. Maximum length is 128 characters.")
-
-        # Check if name already exists
-        if any(e["name"] == env.name for e in environments):
-            raise HTTPException(status_code=400, detail="Environment name already exists.")
+        # Check environment name is valid
+        check_environment_name(environments, env)
         
-        check_comfyui_path(env)
-        mounts = create_mounts(env)
+        # Check ComfyUI path is valid
+        check_comfyui_path(env.comfyui_path)
         
+        # Check if the image is available locally, if not, pull it from Docker Hub
+        try_pull_image(env.image)
+        
+        # Create mounts
+        mounts = create_mounts(env.name, env.options.get("mount_config", {}), Path(env.comfyui_path))
+        print(f"Mounts: {mounts}")
+        
+        # Get port and command
         port = env.options.get("port", COMFYUI_PORT)
         combined_cmd = " --port " + str(port) + " " + env.command
         
-        container = client.containers.create(
+        # Get runtime and device requests
+        runtime = "nvidia" if env.options.get("runtime", "") == "nvidia" else None
+        device_requests = [DeviceRequest(count=-1, capabilities=[["gpu"]])] if runtime else None
+        
+        # Create container
+        container = create_container(
             image=env.image,
             name=env.name,
             command=combined_cmd,
-            runtime="nvidia",
-            device_requests=[
-                DeviceRequest(count=-1, capabilities=[["gpu"]])
-            ],
+            runtime=runtime,
+            device_requests=device_requests,
             ports={f"{port}": port},
             mounts=mounts,
         )
         
-        if not container:
-            raise HTTPException(status_code=500, detail="Failed to create Docker container.")
-        
         env.metadata = {
             "base_image": env.image,
-            "port": port,
+            "created_at": time.time(),
         }
 
         save_environment_to_db(environments, env, container.id, env.image)
@@ -306,42 +101,45 @@ def create_environment(env: Environment):
 @app.post("/environments/{id}/duplicate")
 def duplicate_environment(id: str, env: Environment):
     """Duplicate a container by committing its state to an image and running a new container."""
-    
-    image_repo = "comfy-environment-clone"
-    temp_tag = image_repo + ":temp"
-    latest_tag = image_repo + ":latest"
-    
     environments = load_environments()
 
     try:
-        # Validate name only [a-zA-Z0-9][a-zA-Z0-9_.-] are allowed
-        if not re.match(r'[a-zA-Z0-9][a-zA-Z0-9_.-]', env.name):
-            raise HTTPException(status_code=400, detail="Environment name contains invalid characters. Only alphanumeric characters, dots, underscores, and hyphens are allowed. Minimum length is 2 characters.")
-
-        # Check if name is longer than 128 characters
-        if len(env.name) > 128:
-            raise HTTPException(status_code=400, detail="Environment name is too long. Maximum length is 128 characters.")
+        # Check environment name is valid
+        check_environment_name(environments, env)
         
-        # Check if name already exists
-        if any(e["name"] == env.name for e in environments):
-            print(f"Environment name already exists: {env.name}")
-            raise HTTPException(status_code=400, detail="Environment name already exists.")
-        
+        # Check if environment exists
         prev_env = next((e for e in environments if e["id"] == id), None)
         if prev_env is None:
             print(f"Environment not found: {id}")
             raise HTTPException(status_code=404, detail="Environment not found.")
         
+        # Check if environment has been activated at least once
         if prev_env.get("status") == "created":
             print(f"Environment can only be duplicated after it has been activated at least once. Please activate the environment first.")
             raise HTTPException(status_code=400, detail="An environment can only be duplicated after it has been activated at least once. Please activate the environment first.")
         
-        new_container_name = env.name
+        # Check comfyui path is valid
+        check_comfyui_path(prev_env.get("comfyui_path"))
+        
+        # Create mounts
+        mounts = create_mounts(env.name, env.options.get("mount_config", {}), Path(env.comfyui_path))
+        print(f"Mounts: {mounts}")
+        
+        # Get port and command
+        port = env.options.get("port", COMFYUI_PORT)
+        combined_cmd = " --port " + str(port) + " " + env.command
+        
+        # Get runtime and device requests
+        runtime = "nvidia" if env.options.get("runtime", "") == "nvidia" else None
+        device_requests = [DeviceRequest(count=-1, capabilities=[["gpu"]])] if runtime else None
 
-        container = client.containers.get(id)
-
+        # Get existing container and make a backup image
+        container = get_container(id)
+        image_repo = "comfy-environment-clone"
+        temp_tag = image_repo + ":temp"
+        latest_tag = image_repo + ":latest"
         try:
-            image = client.images.get(latest_tag)
+            image = get_image(latest_tag)
             image.tag(temp_tag)
             print(f"Existing latest image tagged as '{temp_tag}'.")
         except docker.errors.ImageNotFound:
@@ -351,32 +149,27 @@ def duplicate_environment(id: str, env: Environment):
         print(f"New image created: {new_image.id}")
 
         try:
-            client.images.remove(temp_tag, force=True)
+            remove_image(temp_tag, force=True)
             print(f"Temporary backup image '{temp_tag}' removed.")
         except docker.errors.ImageNotFound:
             print("No temporary backup image to remove.")
 
-        mounts = create_mounts(env)
-        port = env.options.get("port", COMFYUI_PORT)
-        combined_cmd = " --port " + str(port) + " " + env.command
-
-        new_container = client.containers.create(
+        # Create new container
+        new_container = create_container(
             image=latest_tag,
-            name=new_container_name,
+            name=env.name,
             command=combined_cmd,
-            runtime="nvidia",
-            device_requests=[
-                DeviceRequest(count=-1, capabilities=[["gpu"]])
-            ],
+            runtime=runtime,
+            device_requests=device_requests,
             ports={f"{port}": port},
             mounts=mounts,
         )
-        print(f"New container '{new_container_name}' with id '{new_container.id}' created from the image.")
+        print(f"New container '{env.name}' with id '{new_container.id}' created from the image.")
         
         env.metadata = prev_env.get("metadata", {})
-        env.metadata["port"] = port
+        env.metadata["created_at"] = time.time()
 
-        save_environment_to_db(environments, env, new_container.id, latest_tag)
+        save_environment_to_db(environments, env, new_container.id, latest_tag, is_duplicate=True)
         return {"status": "success", "container_id": new_container.id}
 
     except HTTPException:
@@ -388,9 +181,9 @@ def duplicate_environment(id: str, env: Environment):
         print(f"An error occurred: {e}")
         try:
             print("Restoring from backup...")
-            client.images.remove(latest_tag, force=True)
-            client.images.get(temp_tag).tag(latest_tag)
-            client.images.remove(temp_tag, force=True)
+            remove_image(latest_tag, force=True)
+            get_image(temp_tag).tag(latest_tag)
+            remove_image(temp_tag, force=True)
             print(f"Restored 'comfy-environment-clone:latest' from backup.")
         except docker.errors.ImageNotFound:
             print("No backup available to restore.")
@@ -419,7 +212,7 @@ def delete_environment(id: str):
 
     try:
         # Stop and remove the Docker container
-        container = client.containers.get(env["id"])
+        container = get_container(env["id"])
         container.stop(timeout=SIGNAL_TIMEOUT)
         container.remove()
 
@@ -443,77 +236,249 @@ def get_environment_status(name: str):
     env = next((e for e in environments if e["name"] == name), None)
     return {"status": env["status"]}
 
+@app.put("/environments/{id}")
+def update_environment(id: str, env: EnvironmentUpdate):
+    """Update an environment in the local database."""
+    environments = load_environments()
+    
+    # Get existing environment
+    existing_env = next((e for e in environments if e["id"] == id), None)
+    if existing_env is None:
+        raise HTTPException(status_code=404, detail="Environment not found.")
+    
+    # Update the environment name
+    if env.name is not None:
+        if any(e["name"] == env.name for e in environments):
+            raise HTTPException(status_code=400, detail="Environment name already exists.")
+        # Try renaming the container:
+        try:
+            container = get_container(existing_env["id"])
+            container.rename(env.name)
+        except docker.errors.NotFound:
+            raise HTTPException(status_code=404, detail="Container not found.")
+        except docker.errors.APIError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        existing_env["name"] = env.name
+    
+    save_environments(environments)
+    return {"status": "success", "container_id": id}
+
 
 @app.post("/environments/{id}/activate")
 def activate_environment(id: str, options: dict = {}):
     print(options)
     """Activate a Docker container."""
     environments = load_environments()
-    env = next((e for e in environments if e["id"] == id), None)
-    if env is None:
-        raise HTTPException(status_code=404, detail="Environment not found.")
-    # Load env into Environment object
-    env = Environment(**env)
-    container = client.containers.get(env.id)
-    if not container:
-        raise HTTPException(status_code=404, detail="Container not found.")
     
-    # Stop all other running containers if they exist:
-    if STOP_OTHER_RUNNING_CONTAINERS:
-        for e in environments:
-            if e["id"] != id and e["status"] == "running":
-                try:
-                    temp_container = client.containers.get(e["id"])
-                    temp_container.stop(timeout=SIGNAL_TIMEOUT)
-                except docker.errors.NotFound:
-                    pass
-                except docker.errors.APIError as e:
-                    raise HTTPException(status_code=400, detail=str(e))
-            
-    print(f"stopping other running containers: {STOP_OTHER_RUNNING_CONTAINERS}")
-    print(container.status)
-    if not container.status == "running":
-        try:
-            container.start()
-        except docker.errors.APIError as e:
-            raise HTTPException(status_code=400, detail=str(e))
-    
-    local_custom_nodes_path = os.path.join(env.comfyui_path, "custom_nodes")
-    print(local_custom_nodes_path)
-    container_custom_nodes_path = CONTAINER_COMFYUI_PATH + "/custom_nodes"
-    print(container_custom_nodes_path)
-    if env.status == "created" and env.options.get("copy_custom_nodes") == "true":
-        print("copying and installing custom nodes")
-        copy_to_container(id, local_custom_nodes_path, container_custom_nodes_path, EXCLUDE_CUSTOM_NODE_DIRS)
-        install_custom_nodes(id, BLACKLIST_REQUIREMENTS, EXCLUDE_CUSTOM_NODE_DIRS)
-        restart_container(id)
+    try:
+        # Get environment
+        env = next((e for e in environments if e["id"] == id), None)
+        if env is None:
+            raise HTTPException(status_code=404, detail="Environment not found.")
         
-    env.status = "running"
-    save_environments(environments)
-    return {"status": "success", "container_id": id}
+        # Load env into Environment object
+        env = Environment(**env)
+        
+        # Get container
+        container = get_container(env.id)
+        
+        # Stop all other running containers if they exist:
+        print(args.allow_running_multiple_containers)
+        if args.allow_running_multiple_containers != "True":
+            for e in environments:
+                if e["id"] != id and e["status"] == "running":
+                    try:
+                        temp_container = get_container(e["id"])
+                        temp_container.stop(timeout=SIGNAL_TIMEOUT)
+                    except docker.errors.NotFound:
+                        pass
+                    except docker.errors.APIError as e:
+                        raise HTTPException(status_code=400, detail=str(e))
+                
+        # Start container if it is not running
+        if not container.status == "running":
+            container.start()
+        
+        # Get comfyui path
+        comfyui_path = Path(env.comfyui_path)
+        
+        # Check mount_config for directories to copy
+        mount_config = env.options.get("mount_config", "{}")
+
+        if env.status == "created":
+            installed_custom_nodes = copy_directories_to_container(id, comfyui_path, mount_config)
+            if installed_custom_nodes:
+                restart_container(id)
+
+        env.status = "running"
+        save_environments(environments)
+        return {"status": "success", "container_id": id}
+    except HTTPException:
+        # Re-raise HTTPExceptions to ensure they are not caught by the generic exception handler
+        raise
+    except docker.errors.APIError as e:
+        print(f"An API error occurred: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except docker.errors.NotFound:
+        raise HTTPException(status_code=404, detail="Container not found.")
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/environments/{id}/deactivate")
 def deactivate_environment(id: str):
     """Deactivate a Docker container."""
     environments = load_environments()
-    env = next((e for e in environments if e["id"] == id), None)
-    if env is None:
-        raise HTTPException(status_code=404, detail="Environment not found.")
-    container = client.containers.get(env["id"])
-    if not container:
-        raise HTTPException(status_code=404, detail="Container not found.")
-    if container.status == "stopped" or container.status == "exited" or container.status == "created" or container.status == "dead":
-        return {"status": "success", "container_id": id}
     try:
+        # Get environment
+        env = next((e for e in environments if e["id"] == id), None)
+        if env is None:
+            raise HTTPException(status_code=404, detail="Environment not found.")
+        
+        # Get container
+        container = get_container(env["id"])
+
+        # Return success if container is not running
+        if container.status == "stopped" or container.status == "exited" or container.status == "created" or container.status == "dead":
+            return {"status": "success", "container_id": id}
+
+        # Stop container
         container.stop(timeout=SIGNAL_TIMEOUT)
+
+        # Update environment status
+        env["status"] = "stopped"
+        save_environments(environments)
+        return {"status": "success", "container_id": id}
+    except HTTPException:
+        raise
+    except docker.errors.NotFound:
+        raise HTTPException(status_code=404, detail="Container not found.")
     except docker.errors.APIError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-    env["status"] = "stopped"
-    save_environments(environments)
-    return {"status": "success", "container_id": id}
+@app.get("/user-settings")
+def get_user_settings():
+    """Get user settings."""
+    default_comfyui_path = args.comfyui_path if args.comfyui_path else ""
+    return load_user_settings(default_comfyui_path)
 
+@app.put("/user-settings")
+def update_user(settings: UserSettings):
+    """Update user settings."""
+    print(settings)
+    update_user_settings(settings.model_dump())
+    return {"status": "success"}
+
+@app.get("/images/tags")
+def get_image_tags():
+    """Get all available image tags from Docker Hub."""
+    try:
+        response = requests.get(
+            "https://hub.docker.com/v2/namespaces/akatzai/repositories/comfyui-env/tags?page_size=100"
+        )
+        response.raise_for_status()  # Raise an error for bad responses
+        data = response.json()
+        tags = [tag['name'] for tag in data.get('results', [])]
+        return {"tags": tags}
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching tags from Docker Hub: {e}")
+        raise HTTPException(status_code=500, detail="Error fetching tags from Docker Hub")
+
+@app.get("/images/exists")
+def check_image(image: str = Query(..., description="The name of the Docker image to check")):
+    print(image)
+    try:
+        get_image(image)
+        return {"status": "found"}
+    except docker.errors.ImageNotFound:
+        raise HTTPException(status_code=404, detail="Image not found locally. Ready to pull.")
+    
+@app.get("/images/pull")
+def pull_image(image: str = Query(..., description="The name of the Docker image to pull")):
+    def image_pull_stream():
+        layers = {}
+        total_download_size = 0
+        total_downloaded = 0
+        completed_layers = set()
+        already_exist_layers = set()
+
+        try:
+            # Start pulling the image
+            for line in pull_image_api(image):
+                # Send raw line for debugging (optional)
+                # yield f"data: {json.dumps(line)}\n\n"
+
+                status = line.get('status')
+                layer_id = line.get('id')
+                progress_detail = line.get('progressDetail', {})
+
+                if layer_id:
+                    if status == "Pull complete":
+                        completed_layers.add(layer_id)
+                    elif status == "Already exists":
+                        already_exist_layers.add(layer_id)
+                    elif 'current' in progress_detail and 'total' in progress_detail:
+                        current = progress_detail.get('current', 0)
+                        total = progress_detail.get('total', 0)
+
+                        if total > 0:
+                            if layer_id not in layers:
+                                layers[layer_id] = {'current': current, 'total': total}
+                                total_download_size += total
+                                total_downloaded += current
+                            else:
+                                total_downloaded -= layers[layer_id]['current']
+                                layers[layer_id]['current'] = current
+                                total_downloaded += current
+
+                        # Compute overall progress
+                        if total_download_size > 0:
+                            overall_progress = (total_downloaded / total_download_size) * 100
+                        else:
+                            overall_progress = 0
+
+                        # Send progress update
+                        yield f"data: {json.dumps({'progress': overall_progress})}\n\n"
+
+            # When done, send completion status
+            yield f"data: {json.dumps({'progress': 100, 'status': 'completed'})}\n\n"
+
+        except docker.errors.APIError as e:
+            error_message = f"Error pulling image {image}: {e}"
+            yield f"data: {json.dumps({'error': error_message})}\n\n"
+
+    return StreamingResponse(image_pull_stream(), media_type="text/event-stream")
+
+@app.post("/install-comfyui")
+def install_comfyui(obj: dict):
+    """Install ComfyUI at given path."""
+    print(obj)
+    try_install_comfyui(obj["path"], obj["branch"])
+    return {"status": "success"}
+
+@app.get("/environments/{id}/logs")
+def stream_container_logs(id: str):
+    """Stream logs from a running Docker container."""
+    try:
+        container = get_container(id)
+    except docker.errors.NotFound:
+        raise HTTPException(status_code=404, detail="Container not found.")
+    except docker.errors.APIError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    if container.status != "running":
+        raise HTTPException(status_code=400, detail="Container is not running.")
+
+    def log_generator():
+        for log in container.logs(stream=True):
+            decoded_log = log.decode('utf-8')
+            yield f"data: {decoded_log}\n\n"
+
+    return StreamingResponse(log_generator(), media_type="text/event-stream")
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=5172)
