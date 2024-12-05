@@ -48,13 +48,13 @@ def create_environment(env: Environment):
         check_environment_name(environments, env)
         
         # Check ComfyUI path is valid
-        check_comfyui_path(env.comfyui_path)
+        valid_comfyui_path = check_comfyui_path(env.comfyui_path)
         
         # Check if the image is available locally, if not, pull it from Docker Hub
         try_pull_image(env.image)
         
         # Create mounts
-        mounts = create_mounts(env.name, env.options.get("mount_config", {}), Path(env.comfyui_path))
+        mounts = create_mounts(env.name, env.options.get("mount_config", {}), valid_comfyui_path)
         print(f"Mounts: {mounts}")
         
         # Get port and command
@@ -452,6 +452,12 @@ def pull_image(image: str = Query(..., description="The name of the Docker image
             yield f"data: {json.dumps({'error': error_message})}\n\n"
 
     return StreamingResponse(image_pull_stream(), media_type="text/event-stream")
+
+@app.post("/valid-comfyui-path")
+def get_valid_comfyui_path(obj: dict):
+    """Get the valid ComfyUI path."""
+    valid_comfyui_path = check_comfyui_path(obj["path"])
+    return {"valid_comfyui_path": str(valid_comfyui_path)}
 
 @app.post("/install-comfyui")
 def install_comfyui(obj: dict):

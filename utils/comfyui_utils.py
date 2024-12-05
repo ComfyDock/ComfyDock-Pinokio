@@ -33,7 +33,7 @@ def try_install_comfyui(path: str, branch: str = "master"):
         raise HTTPException(status_code=500, detail=f"Error during ComfyUI installation: {str(e)}")
 
 def check_comfyui_path(path: str):
-    """Check if the ComfyUI path is valid and handle installation if needed."""
+    """Check if the ComfyUI path is valid and handle installation if needed. Returns the Path to the ComfyUI directory."""
     comfyui_path = Path(path)
     
     if not comfyui_path.exists():
@@ -44,7 +44,7 @@ def check_comfyui_path(path: str):
     
     if not comfyui_path.name.endswith("ComfyUI"):
         comfyui_dir = comfyui_path / "ComfyUI"
-        if comfyui_dir.exists():
-            raise HTTPException(status_code=400, detail=f"Existing ComfyUI directory found at: {comfyui_dir}.")
-        
-        raise HTTPException(status_code=400, detail="No valid ComfyUI installation found.")
+        if not comfyui_dir.exists():
+            raise HTTPException(status_code=400, detail="No valid ComfyUI installation found.")
+        return comfyui_dir
+    return comfyui_path
