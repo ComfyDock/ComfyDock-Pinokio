@@ -13,11 +13,6 @@ module.exports = {
   ],
   menu: [
     {
-      text: "Get Docker Desktop",
-      href: "https://www.docker.com/products/docker-desktop/",
-      icon: "fa-brands fa-docker"
-    },
-    {
       text: "Help",
       href: "https://cyber-damselfly-b6c.notion.site/ComfyUI-Environment-Manager-14ffd5b1ca3b804abafbdb4bd6b8068e",
       icon: "fa-solid fa-circle-info"
