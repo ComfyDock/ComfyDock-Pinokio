@@ -5,10 +5,12 @@ import os
 from pathlib import Path
 import docker
 import re
+from filelock import FileLock, Timeout
 
 from .docker_utils import get_container
 
 DB_FILE = "environments.json"
+LOCK_FILE = f"{DB_FILE}.lock"
 
 # Pydantic model for environment creation
 class Environment(BaseModel):
@@ -26,16 +28,32 @@ class EnvironmentUpdate(BaseModel):
     name: str = None
     
 def save_environments(data):
-    with open(DB_FILE, "w") as f:
-        json.dump(data, f, indent=4)
+    lock = FileLock(LOCK_FILE, timeout=10)
+    try:
+        with lock:
+            with open(DB_FILE, "w") as f:
+                json.dump(data, f, indent=4)
+    except Timeout:
+        raise HTTPException(status_code=500, detail="Could not acquire file lock for saving environments.")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"An error occurred while saving environments: {str(e)}")
 
 # Helper function to load and save JSON data
 def load_environments():
     environments = []
-    if Path(DB_FILE).exists():
-        with open(DB_FILE, "r") as f:
-            environments = json.load(f)
-    
+    lock = FileLock(LOCK_FILE, timeout=10)
+    try:
+        with lock:
+            if Path(DB_FILE).exists():
+                with open(DB_FILE, "r") as f:
+                    environments = json.load(f)
+    except Timeout:
+        raise HTTPException(status_code=500, detail="Could not acquire file lock for loading environments.")
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=500, detail="Error decoding JSON from environments file.")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"An error occurred while loading environments: {str(e)}")
+
     # Query the database for the status of each container and ensure they match the status in the database
     for env in environments:
         try:
@@ -46,10 +64,10 @@ def load_environments():
             return HTTPException(status_code=500, detail=str(e))
         else:
             env["status"] = container.status
-            
+
     # save the updated statuses
     save_environments(environments)
-    
+
     return environments
   
 def save_environment_to_db(environments, env, container_id, image, is_duplicate: bool = False):

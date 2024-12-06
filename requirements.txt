@@ -2,3 +2,4 @@ fastapi[all]
 pydantic
 docker
 uvicorn
+filelock
