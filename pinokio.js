@@ -18,6 +18,11 @@ module.exports = {
       icon: "fa-solid fa-circle-info"
     },
     {
+      text: "Update",
+      href: "update.json",
+      icon: "fa-solid fa-screwdriver-wrench"
+    },
+    {
       text: "Install",
       href: "install.json",
       icon: "fa-solid fa-screwdriver-wrench"
