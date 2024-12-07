@@ -70,7 +70,7 @@ def create_environment(env: Environment):
             image=env.image,
             name=env.name,
             command=combined_cmd,
-            runtime=runtime,
+            # runtime=runtime,
             device_requests=device_requests,
             ports={f"{port}": port},
             mounts=mounts,
@@ -133,33 +133,24 @@ def duplicate_environment(id: str, env: Environment):
         runtime = "nvidia" if env.options.get("runtime", "") == "nvidia" else None
         device_requests = [DeviceRequest(count=-1, capabilities=[["gpu"]])] if runtime else None
 
-        # Get existing container and make a backup image
+        # Get existing container and create a unique image
         container = get_container(id)
-        image_repo = "comfy-environment-clone"
-        temp_tag = image_repo + ":temp"
-        latest_tag = image_repo + ":latest"
+        image_repo = "comfy-env-clone"
+        unique_tag = f"{image_repo}:{env.name}"
+        
         try:
-            image = get_image(latest_tag)
-            image.tag(temp_tag)
-            print(f"Existing latest image tagged as '{temp_tag}'.")
-        except docker.errors.ImageNotFound:
-            print("No previous latest image found. Proceeding without backup.")
-
-        new_image = container.commit(repository=image_repo, tag="latest")
-        print(f"New image created: {new_image.id}")
-
-        try:
-            remove_image(temp_tag, force=True)
-            print(f"Temporary backup image '{temp_tag}' removed.")
-        except docker.errors.ImageNotFound:
-            print("No temporary backup image to remove.")
+            new_image = container.commit(repository=image_repo, tag=env.name)
+            print(f"New image created with tag '{unique_tag}': {new_image.id}")
+        except docker.errors.APIError as e:
+            print(f"An error occurred: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
 
         # Create new container
         new_container = create_container(
-            image=latest_tag,
+            image=unique_tag,
             name=env.name,
             command=combined_cmd,
-            runtime=runtime,
+            # runtime=runtime,
             device_requests=device_requests,
             ports={f"{port}": port},
             mounts=mounts,
@@ -169,24 +160,19 @@ def duplicate_environment(id: str, env: Environment):
         env.metadata = prev_env.get("metadata", {})
         env.metadata["created_at"] = time.time()
 
-        save_environment_to_db(environments, env, new_container.id, latest_tag, is_duplicate=True)
+        save_environment_to_db(environments, env, new_container.id, unique_tag, is_duplicate=True)
         return {"status": "success", "container_id": new_container.id}
 
     except HTTPException:
         # Re-raise HTTPExceptions to ensure they are not caught by the generic exception handler
         raise
+    except docker.errors.ImageNotFound:
+        print("Image not found. Please check the image name and try again.")
+        raise HTTPException(status_code=404, detail="Image not found. Please check the image name and try again.")
     except docker.errors.NotFound:
         raise HTTPException(status_code=404, detail="Container not found.")
     except docker.errors.APIError as e:
         print(f"An error occurred: {e}")
-        try:
-            print("Restoring from backup...")
-            remove_image(latest_tag, force=True)
-            get_image(temp_tag).tag(latest_tag)
-            remove_image(temp_tag, force=True)
-            print(f"Restored 'comfy-environment-clone:latest' from backup.")
-        except docker.errors.ImageNotFound:
-            print("No backup available to restore.")
         raise
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
@@ -215,6 +201,17 @@ def delete_environment(id: str):
         container = get_container(env["id"])
         container.stop(timeout=SIGNAL_TIMEOUT)
         container.remove()
+
+        # If the environment is a duplicate, try to remove its backing image
+        if env.get("duplicate", False):
+            try:
+                remove_image(env["image"], force=True)
+                print(f"Backing image '{env['image']}' removed.")
+            except docker.errors.ImageNotFound:
+                print(f"Backing image '{env['image']}' not found.")
+            except docker.errors.APIError as e:
+                print(f"Error removing image '{env['image']}': {e}")
+                raise HTTPException(status_code=400, detail=f"Error removing image: {str(e)}")
 
         # Update the database
         environments = [e for e in environments if e["id"] != id]
