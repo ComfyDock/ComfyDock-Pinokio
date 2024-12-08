@@ -5,7 +5,7 @@
       "method": "shell.run",
       "params": {
         "venv": "env",
-        "message": "python start_server.py --comfyui_path {{env.EXISTING_COMFYUI_PATH}} --allow_running_multiple_containers {{env.ALLOW_RUNNING_MULTIPLE_CONTAINERS}}"
+        "message": "python start_server.py --allow_running_multiple_containers {{env.ALLOW_RUNNING_MULTIPLE_CONTAINERS}}"
       }
     }
   ]
