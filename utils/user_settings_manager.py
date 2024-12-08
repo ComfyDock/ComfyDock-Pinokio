@@ -1,6 +1,7 @@
 from pydantic import BaseModel
 import json
 from pathlib import Path
+from filelock import FileLock
 
 USER_SETTINGS_FILE = "user.settings.json"
 
@@ -13,19 +14,23 @@ class UserSettings(BaseModel):
 
 def load_user_settings(default_comfyui_path: str) -> UserSettings:
     """Load user settings from a JSON file, or return default settings if the file does not exist."""
-    if Path(USER_SETTINGS_FILE).exists():
-        with open(USER_SETTINGS_FILE, "r") as f:
-            data = json.load(f)
-            return UserSettings(**data)
-    else:
-        # Return default settings if the file does not exist
-        return UserSettings(comfyui_path=default_comfyui_path)
+    lock = FileLock(f"{USER_SETTINGS_FILE}.lock")
+    with lock:
+        if Path(USER_SETTINGS_FILE).exists():
+            with open(USER_SETTINGS_FILE, "r") as f:
+                data = json.load(f)
+                return UserSettings(**data)
+        else:
+            # Return default settings if the file does not exist
+            return UserSettings(comfyui_path=default_comfyui_path)
 
 def save_user_settings(settings: UserSettings):
     """Save user settings to a JSON file."""
-    with open(USER_SETTINGS_FILE, "w") as f:
-        print(settings.model_dump())
-        json.dump(settings.model_dump(), f, indent=4)
+    lock = FileLock(f"{USER_SETTINGS_FILE}.lock")
+    with lock:
+        with open(USER_SETTINGS_FILE, "w") as f:
+            print(settings.model_dump())
+            json.dump(settings.model_dump(), f, indent=4)
 
 def update_user_settings(new_settings: dict):
     """Update user settings with new values."""
