@@ -9,6 +9,7 @@ from pathlib import Path
 from fastapi.responses import StreamingResponse
 import argparse
 import requests
+import os
 
 from utils.comfyui_utils import check_comfyui_path, try_install_comfyui
 from utils.docker_utils import copy_directories_to_container, create_container, create_mounts, get_container, get_image, pull_image_api, remove_image, restart_container, try_pull_image
@@ -19,10 +20,10 @@ from utils.user_settings_manager import UserSettings, load_user_settings, update
 FRONTEND_ORIGIN = "http://localhost:8000"
 SIGNAL_TIMEOUT = 2
 COMFYUI_PORT = 8188
+DEFAULT_COMFYUI_PATH = os.getcwd()
 
 # Parse command-line arguments
 parser = argparse.ArgumentParser(description="Run the FastAPI app with optional ComfyUI path.")
-parser.add_argument("--comfyui_path", type=str, help="Default ComfyUI path")
 parser.add_argument("--allow_running_multiple_containers", type=str, help="Allow running multiple containers", default="False")
 args = parser.parse_args()
 
@@ -360,7 +361,8 @@ def deactivate_environment(id: str):
 @app.get("/user-settings")
 def get_user_settings():
     """Get user settings."""
-    default_comfyui_path = args.comfyui_path if args.comfyui_path else ""
+    default_comfyui_path = DEFAULT_COMFYUI_PATH
+    print(default_comfyui_path)
     return load_user_settings(default_comfyui_path)
 
 @app.put("/user-settings")

@@ -1,12 +1,5 @@
 #####################################################################################################################
 #
-# EXISTING_COMFYUI_PATH
-#
-#####################################################################################################################
-EXISTING_COMFYUI_PATH=C:\Users\pinok\Desktop\ComfyUI
-
-#####################################################################################################################
-#
 # ALLOW_RUNNING_MULTIPLE_CONTAINERS (True/False)
 # Should be set to true if you want to allow running multiple environments on the same machine.
 # Note: If containers share the same port, they will conflict with each other.

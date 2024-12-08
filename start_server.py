@@ -15,7 +15,6 @@ FRONTEND_IMAGE_VERSION = "0.0.2"
 def parse_arguments():
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description="Run the server with optional ComfyUI path.")
-    parser.add_argument("--comfyui_path", type=str, required=True, help="Default ComfyUI path")
     parser.add_argument("--allow_running_multiple_containers", type=str, help="Allow running multiple containers", default="False")
     # Assert that the argument is "True" or "False"
     assert parser.parse_args().allow_running_multiple_containers in ["True", "False"], "Argument allow_running_multiple_containers must be 'True' or 'False'"
@@ -60,10 +59,10 @@ def stop_container():
     except Exception as e:
         print(f"Error stopping container: {e}")
 
-def start_server(comfyui_path, allow_running_multiple_containers):
+def start_server(allow_running_multiple_containers):
     """Start the Python server."""
     python_interpreter = sys.executable
-    server_command = [python_interpreter, "app.py", "--allow_running_multiple_containers", str(allow_running_multiple_containers), "--comfyui_path", comfyui_path]
+    server_command = [python_interpreter, "app.py", "--allow_running_multiple_containers", str(allow_running_multiple_containers)]
     print("Starting Python server...")
     return subprocess.Popen(server_command)
 
@@ -82,7 +81,7 @@ if __name__ == "__main__":
 
     # Start the container and server
     start_container()
-    server_process = start_server(args.comfyui_path, args.allow_running_multiple_containers)
+    server_process = start_server(args.allow_running_multiple_containers)
 
     # Wait for the server process to complete
     try:
