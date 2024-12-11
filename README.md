@@ -23,7 +23,7 @@
 
 ---
 
-https://github.com/user-attachments/assets/1f7189af-afee-4aeb-a7a9-402401b59511
+https://github.com/user-attachments/assets/dad71a6c-c747-48ff-b97a-c2db06c6d927
 
 ## 🚀 **Features**
 
@@ -38,7 +38,7 @@ https://github.com/user-attachments/assets/1f7189af-afee-4aeb-a7a9-402401b59511
 ## 🛠️ **Installation**
 
 
-https://github.com/user-attachments/assets/04ef6da2-d8eb-4a2a-b89a-82a6232d18ba
+https://github.com/user-attachments/assets/0bcbc830-6e6c-41e5-819c-d4d394145478
 
 
 ### **Prerequisites**
@@ -83,7 +83,7 @@ https://github.com/user-attachments/assets/04ef6da2-d8eb-4a2a-b89a-82a6232d18ba
 ### **Creating a New Environment**
 
 
-https://github.com/user-attachments/assets/801c1dc9-cb68-48aa-8721-01e5bc806712
+https://github.com/user-attachments/assets/cbe97267-bb5d-47e1-9d2a-eb1077758164
 
 
 1. Click **Create Environment**.
@@ -98,7 +98,7 @@ https://github.com/user-attachments/assets/801c1dc9-cb68-48aa-8721-01e5bc806712
 ### **Duplicating an Environment**
 
 
-https://github.com/user-attachments/assets/865cac91-2094-4d34-be7d-38e2d7aac693
+https://github.com/user-attachments/assets/62c41be0-f292-4c92-89d1-2b6f794c2b07
 
 
 - Use the **Duplicate** button on an existing environment.
