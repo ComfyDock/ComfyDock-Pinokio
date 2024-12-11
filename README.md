@@ -23,7 +23,8 @@
 
 ---
 
-https://github.com/user-attachments/assets/1f7189af-afee-4aeb-a7a9-402401b59511
+
+https://github.com/user-attachments/assets/5b10c633-ed0f-4770-9028-9345d72ccbb3
 
 ## 🚀 **Features**
 
