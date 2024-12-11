@@ -23,7 +23,7 @@
 
 ---
 
-https://github.com/user-attachments/assets/dad71a6c-c747-48ff-b97a-c2db06c6d927
+https://github.com/user-attachments/assets/7f1e868e-fb0d-4b1b-aaec-a1ef1a9949f3
 
 ## 🚀 **Features**
 
@@ -37,9 +37,7 @@ https://github.com/user-attachments/assets/dad71a6c-c747-48ff-b97a-c2db06c6d927
 
 ## 🛠️ **Installation**
 
-
-https://github.com/user-attachments/assets/0bcbc830-6e6c-41e5-819c-d4d394145478
-
+https://github.com/user-attachments/assets/3b95c4a5-e88b-458e-9933-68856f3b09da
 
 ### **Prerequisites**
 
@@ -82,9 +80,7 @@ https://github.com/user-attachments/assets/0bcbc830-6e6c-41e5-819c-d4d394145478
 
 ### **Creating a New Environment**
 
-
-https://github.com/user-attachments/assets/cbe97267-bb5d-47e1-9d2a-eb1077758164
-
+https://github.com/user-attachments/assets/50becd6e-5c6a-4018-8ef3-596b17ae6cc1
 
 1. Click **Create Environment**.
 2. Fill in the fields:
@@ -97,9 +93,7 @@ https://github.com/user-attachments/assets/cbe97267-bb5d-47e1-9d2a-eb1077758164
 
 ### **Duplicating an Environment**
 
-
-https://github.com/user-attachments/assets/62c41be0-f292-4c92-89d1-2b6f794c2b07
-
+https://github.com/user-attachments/assets/ac2880f6-55b8-4b03-97e8-8ba0f86de87e
 
 - Use the **Duplicate** button on an existing environment.
 - Mounted directories are **not copied**, but installed dependencies and container data are included.
