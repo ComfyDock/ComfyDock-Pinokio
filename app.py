@@ -397,6 +397,10 @@ def create_folder(folder_data: dict):
     settings = settings.model_dump()
     if "folders" not in settings:
         settings["folders"] = []
+        
+    # Check folder name is not longer than 128 characters
+    if len(folder_data["name"]) > 128:
+        raise HTTPException(status_code=400, detail="Folder name is too long. Maximum length is 128 characters.")
 
     # Ensure we don't add duplicates of default folders
     if folder_data["name"] in [f["name"] for f in settings["folders"]]:

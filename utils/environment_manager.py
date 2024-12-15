@@ -71,9 +71,11 @@ def load_environments(folder_id: str = None):
     # save the updated statuses
     save_environments(environments)
     
-    # filter environments by folder_id if provided
+    # Filter environments by folder_id if provided
     if folder_id and folder_id != 'all':
         environments = [env for env in environments if folder_id in env.get("folderIds", [])]
+    elif folder_id == 'all':
+        environments = [env for env in environments if 'deleted' not in env.get("folderIds", [])]
 
     return environments
 
