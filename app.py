@@ -15,6 +15,7 @@ from utils.comfyui_utils import check_comfyui_path, try_install_comfyui
 from utils.docker_utils import copy_directories_to_container, create_container, create_mounts, get_container, get_image, pull_image_api, remove_image, restart_container, try_pull_image
 from utils.environment_manager import Environment, EnvironmentUpdate, check_environment_name, load_environments, save_environment_to_db, save_environments
 from utils.user_settings_manager import UserSettings, load_user_settings, update_user_settings
+from utils.utils import generate_id
 
 # Constants
 FRONTEND_ORIGIN = "http://localhost:8000"
@@ -66,10 +67,14 @@ def create_environment(env: Environment):
         runtime = "nvidia" if env.options.get("runtime", "") == "nvidia" else None
         device_requests = [DeviceRequest(count=-1, capabilities=[["gpu"]])] if runtime else None
         
+        # Create unique container name
+        container_name = f"comfy-env-{generate_id()}"
+        env.container_name = container_name
+
         # Create container
         container = create_container(
             image=env.image,
-            name=env.name,
+            name=container_name,
             command=combined_cmd,
             # runtime=runtime,
             device_requests=device_requests,
@@ -133,35 +138,40 @@ def duplicate_environment(id: str, env: Environment):
         # Get runtime and device requests
         runtime = "nvidia" if env.options.get("runtime", "") == "nvidia" else None
         device_requests = [DeviceRequest(count=-1, capabilities=[["gpu"]])] if runtime else None
+        
+        # Create unique container name
+        container_name = f"comfy-env-{generate_id()}"
+        env.container_name = container_name
 
         # Get existing container and create a unique image
         container = get_container(id)
         image_repo = "comfy-env-clone"
-        unique_tag = f"{image_repo}:{env.name}"
+        unique_image = f"{image_repo}:{container_name}"
         
+        # Create unique image
         try:
-            new_image = container.commit(repository=image_repo, tag=env.name)
-            print(f"New image created with tag '{unique_tag}': {new_image.id}")
+            new_image = container.commit(repository=image_repo, tag=container_name)
+            print(f"New image created with tag '{unique_image}': {new_image.id}")
         except docker.errors.APIError as e:
             print(f"An error occurred: {e}")
             raise HTTPException(status_code=500, detail=str(e))
 
         # Create new container
         new_container = create_container(
-            image=unique_tag,
-            name=env.name,
+            image=unique_image,
+            name=container_name,
             command=combined_cmd,
             # runtime=runtime,
             device_requests=device_requests,
             ports={f"{port}": port},
             mounts=mounts,
         )
-        print(f"New container '{env.name}' with id '{new_container.id}' created from the image.")
+        print(f"New container '{container_name}' with id '{new_container.id}' created from the image.")
         
         env.metadata = prev_env.get("metadata", {})
         env.metadata["created_at"] = time.time()
 
-        save_environment_to_db(environments, env, new_container.id, unique_tag, is_duplicate=True)
+        save_environment_to_db(environments, env, new_container.id, unique_image, is_duplicate=True)
         return {"status": "success", "container_id": new_container.id}
 
     except HTTPException:
@@ -248,14 +258,17 @@ def update_environment(id: str, env: EnvironmentUpdate):
     if env.name is not None:
         if any(e["name"] == env.name for e in environments):
             raise HTTPException(status_code=400, detail="Environment name already exists.")
+        
+        if existing_env.get("container_name") is None:
+            existing_env["container_name"] = existing_env["name"]
         # Try renaming the container:
-        try:
-            container = get_container(existing_env["id"])
-            container.rename(env.name)
-        except docker.errors.NotFound:
-            raise HTTPException(status_code=404, detail="Container not found.")
-        except docker.errors.APIError as e:
-            raise HTTPException(status_code=400, detail=str(e))
+        # try:
+        #     container = get_container(existing_env["id"])
+        #     container.rename(env.name)
+        # except docker.errors.NotFound:
+        #     raise HTTPException(status_code=404, detail="Container not found.")
+        # except docker.errors.APIError as e:
+        #     raise HTTPException(status_code=400, detail=str(e))
         existing_env["name"] = env.name
     
     save_environments(environments)

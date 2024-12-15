@@ -16,6 +16,7 @@ LOCK_FILE = f"{DB_FILE}.lock"
 class Environment(BaseModel):
     name: str
     image: str
+    container_name: str = ""
     id: str = ""
     status: str = ""
     command: str = ""
@@ -69,27 +70,28 @@ def load_environments():
     save_environments(environments)
 
     return environments
-  
+
 def save_environment_to_db(environments, env, container_id, image, is_duplicate: bool = False):
     """Save the environment details to the database."""
-    new_env = {
-        "name": env.name,
+    # Convert the Environment instance to a dictionary
+    env_dict = env.dict()
+
+    # Update the dictionary with special fields
+    env_dict.update({
         "image": image,
-        "status": "created",
         "id": container_id,
-        "comfyui_path": env.comfyui_path,
-        "command": env.command,
         "duplicate": is_duplicate,
-        "options": env.options,
-        "metadata": env.metadata,
-    }
-    environments.append(new_env)
+        "status": "created"
+    })
+
+    # Append the updated environment to the list
+    environments.append(env_dict)
     save_environments(environments)
     
 def check_environment_name(environments, env):
     # Validate name only [a-zA-Z0-9][a-zA-Z0-9_.-] are allowed
-    if not re.match(r'[a-zA-Z0-9][a-zA-Z0-9_.-]', env.name):
-        raise HTTPException(status_code=400, detail="Environment name contains invalid characters. Only alphanumeric characters, dots, underscores, and hyphens are allowed. Minimum length is 2 characters.")
+    # if not re.match(r'^[a-zA-Z0-9][a-zA-Z0-9 ._/-]*$', env.name):
+    #     raise HTTPException(status_code=400, detail="Environment name contains invalid characters. Only alphanumeric characters, spaces, hyphens, dashes, periods, and slashes are allowed. Minimum length is 2 characters.")
 
     # Check if name is longer than 128 characters
     if len(env.name) > 128:
