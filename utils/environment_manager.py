@@ -24,9 +24,11 @@ class Environment(BaseModel):
     duplicate: bool = False
     options: dict = {}
     metadata: dict = {}
+    folderIds: list[str] = []
 
 class EnvironmentUpdate(BaseModel):
     name: str = None
+    folderIds: list[str] = []
     
 def save_environments(data):
     lock = FileLock(LOCK_FILE, timeout=10)
@@ -40,7 +42,7 @@ def save_environments(data):
         raise HTTPException(status_code=500, detail=f"An error occurred while saving environments: {str(e)}")
 
 # Helper function to load and save JSON data
-def load_environments():
+def load_environments(folder_id: str = None):
     environments = []
     lock = FileLock(LOCK_FILE, timeout=10)
     try:
@@ -68,6 +70,10 @@ def load_environments():
 
     # save the updated statuses
     save_environments(environments)
+    
+    # filter environments by folder_id if provided
+    if folder_id and folder_id != 'all':
+        environments = [env for env in environments if folder_id in env.get("folderIds", [])]
 
     return environments
 
@@ -98,5 +104,5 @@ def check_environment_name(environments, env):
         raise HTTPException(status_code=400, detail="Environment name is too long. Maximum length is 128 characters.")
 
     # Check if name already exists
-    if any(e["name"] == env.name for e in environments):
-        raise HTTPException(status_code=400, detail="Environment name already exists.")
+    # if any(e["name"] == env.name for e in environments):
+    #     raise HTTPException(status_code=400, detail="Environment name already exists.")

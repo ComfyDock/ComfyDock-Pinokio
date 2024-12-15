@@ -1,5 +1,6 @@
 import json
 import time
+import uuid
 from fastapi import FastAPI, HTTPException, Query
 import docker
 from docker.types import DeviceRequest
@@ -14,7 +15,7 @@ import os
 from utils.comfyui_utils import check_comfyui_path, try_install_comfyui
 from utils.docker_utils import copy_directories_to_container, create_container, create_mounts, get_container, get_image, pull_image_api, remove_image, restart_container, try_pull_image
 from utils.environment_manager import Environment, EnvironmentUpdate, check_environment_name, load_environments, save_environment_to_db, save_environments
-from utils.user_settings_manager import UserSettings, load_user_settings, update_user_settings
+from utils.user_settings_manager import Folder, UserSettings, load_user_settings, update_user_settings
 from utils.utils import generate_id
 
 # Constants
@@ -191,9 +192,13 @@ def duplicate_environment(id: str, env: Environment):
 
 
 @app.get("/environments")
-def list_environments():
+def list_environments(folderId: str = Query(None, description="The ID of the folder to filter environments")):
     """List environments from the local database."""
-    environments = load_environments()
+    print(folderId)
+    if folderId:
+        environments = load_environments(folder_id=folderId)
+    else:
+        environments = load_environments()
     return environments
 
 
@@ -254,22 +259,21 @@ def update_environment(id: str, env: EnvironmentUpdate):
     if existing_env is None:
         raise HTTPException(status_code=404, detail="Environment not found.")
     
+    # Update folderIds
+    if env.folderIds is not None:
+        existing_env["folderIds"] = env.folderIds
+    
     # Update the environment name
     if env.name is not None:
-        if any(e["name"] == env.name for e in environments):
-            raise HTTPException(status_code=400, detail="Environment name already exists.")
+        # Check if the new name already exists
+        # if any(e["name"] == env.name and e["id"] != id for e in environments):
+        #     raise HTTPException(status_code=400, detail="Environment name already exists.")
         
         if existing_env.get("container_name") is None:
             existing_env["container_name"] = existing_env["name"]
-        # Try renaming the container:
-        # try:
-        #     container = get_container(existing_env["id"])
-        #     container.rename(env.name)
-        # except docker.errors.NotFound:
-        #     raise HTTPException(status_code=404, detail="Container not found.")
-        # except docker.errors.APIError as e:
-        #     raise HTTPException(status_code=400, detail=str(e))
+            
         existing_env["name"] = env.name
+        
     
     save_environments(environments)
     return {"status": "success", "container_id": id}
@@ -384,6 +388,61 @@ def update_user(settings: UserSettings):
     print(settings)
     update_user_settings(settings.model_dump())
     return {"status": "success"}
+
+@app.post("/folders")
+def create_folder(folder_data: dict):
+    # folder_data = {"name": "New Folder Name"}
+    folder_id = str(uuid.uuid4())
+    settings = load_user_settings(DEFAULT_COMFYUI_PATH)
+    settings = settings.model_dump()
+    if "folders" not in settings:
+        settings["folders"] = []
+
+    # Ensure we don't add duplicates of default folders
+    if folder_data["name"] in [f["name"] for f in settings["folders"]]:
+        raise HTTPException(status_code=400, detail="Folder name already exists.")
+    
+    # Convert user input to Folder object
+    folder = Folder(id=folder_id, name=folder_data["name"])
+    
+    settings["folders"].append(folder)
+    update_user_settings(settings)
+    return {"id": folder_id, "name": folder_data["name"]}
+
+@app.put("/folders/{folder_id}")
+def update_folder(folder_id: str, folder_data: dict):
+    # folder_data = { "name": "New Folder Name" }
+    # Convert user input to Folder object
+    folder = Folder(id=folder_id, name=folder_data["name"])
+    settings = load_user_settings(DEFAULT_COMFYUI_PATH)
+    settings = settings.model_dump()
+    folders = settings.get("folders", [])
+    for f in folders:
+        if f["id"] == folder_id:
+            f["name"] = folder.name
+            update_user_settings(settings)
+            return {"id": folder_id, "name": folder.name}
+    raise HTTPException(status_code=404, detail="Folder not found")
+
+@app.delete("/folders/{folder_id}")
+def delete_folder(folder_id: str):
+    # Check if any environment uses this folder_id
+    environments = load_environments()
+    for env in environments:
+        if folder_id in env.get("folderIds", []):
+            raise HTTPException(status_code=400, detail="Cannot delete folder - it contains environments.")
+
+    settings = load_user_settings(DEFAULT_COMFYUI_PATH)
+    settings = settings.model_dump()
+    folders = settings.get("folders", [])
+    for i, f in enumerate(folders):
+        if f["id"] == folder_id:
+            del folders[i]
+            settings["folders"] = folders
+            update_user_settings(settings)
+            return {"status": "deleted"}
+
+    raise HTTPException(status_code=404, detail="Folder not found")
 
 @app.get("/images/tags")
 def get_image_tags():
