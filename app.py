@@ -14,7 +14,7 @@ import os
 
 from utils.comfyui_utils import check_comfyui_path, try_install_comfyui
 from utils.docker_utils import copy_directories_to_container, create_container, create_mounts, get_container, get_image, pull_image_api, remove_image, restart_container, try_pull_image
-from utils.environment_manager import Environment, EnvironmentUpdate, check_environment_name, load_environments, save_environment_to_db, save_environments
+from utils.environment_manager import Environment, EnvironmentUpdate, check_environment_name, hard_delete_environment, load_environments, prune_deleted_environments, save_environment_to_db, save_environments
 from utils.user_settings_manager import Folder, UserSettings, load_user_settings, update_user_settings
 from utils.utils import generate_id
 
@@ -23,6 +23,7 @@ FRONTEND_ORIGIN = "http://localhost:8000"
 SIGNAL_TIMEOUT = 2
 COMFYUI_PORT = 8188
 DEFAULT_COMFYUI_PATH = os.getcwd()
+DELETED_FOLDER_ID = "deleted"
 
 # Parse command-line arguments
 parser = argparse.ArgumentParser(description="Run the FastAPI app with optional ComfyUI path.")
@@ -204,7 +205,19 @@ def list_environments(folderId: str = Query(None, description="The ID of the fol
 
 @app.delete("/environments/{id}")
 def delete_environment(id: str):
-    """Stop and remove a Docker container and update local database."""
+    """Soft delete or hard delete a Docker environment.
+
+    Steps:
+    1. If the environment is not in the deleted folder:
+       - Add it to the deleted folder
+       - Set deleted_at timestamp in metadata
+       - Do not remove container or environment from DB permanently
+       - Prune older deleted environments if needed
+
+    2. If the environment is already in the deleted folder:
+       - Stop and remove container
+       - Remove environment from DB
+    """
     environments = load_environments()
 
     # Find the environment
@@ -212,34 +225,37 @@ def delete_environment(id: str):
     if not env:
         raise HTTPException(status_code=404, detail="Environment not found.")
 
-    try:
-        # Stop and remove the Docker container
-        container = get_container(env["id"])
-        container.stop(timeout=SIGNAL_TIMEOUT)
-        container.remove()
+    # Load user settings for max_deleted_environments
+    user_settings = load_user_settings(DEFAULT_COMFYUI_PATH)
+    max_deleted = user_settings.max_deleted_environments
 
-        # If the environment is a duplicate, try to remove its backing image
-        if env.get("duplicate", False):
-            try:
-                remove_image(env["image"], force=True)
-                print(f"Backing image '{env['image']}' removed.")
-            except docker.errors.ImageNotFound:
-                print(f"Backing image '{env['image']}' not found.")
-            except docker.errors.APIError as e:
-                print(f"Error removing image '{env['image']}': {e}")
-                raise HTTPException(status_code=400, detail=f"Error removing image: {str(e)}")
+    # Check if environment is already in the "deleted" folder
+    if DELETED_FOLDER_ID in env.get("folderIds", []):
+        # Hard delete environment, throws HTTPException if error, modifies environments in place
+        hard_delete_environment(env, environments, timeout=SIGNAL_TIMEOUT)
+        save_environments(environments)
+        return {"status": "success (permanently deleted)", "id": id}
+    else:
+        # Environment is not in the deleted folder, so we soft-delete it
+        # Add the "deleted" folder to its folderIds
+        # folder_ids = env.get("folderIds", [])
+        # if DELETED_FOLDER_ID not in folder_ids:
+        #     folder_ids.append(DELETED_FOLDER_ID)
+        env["folderIds"] = [DELETED_FOLDER_ID,]
 
-        # Update the database
-        environments = [e for e in environments if e["id"] != id]
+        # Set deleted_at timestamp in metadata
+        if "metadata" not in env:
+            env["metadata"] = {}
+        env["metadata"]["deleted_at"] = time.time()
+
+        # Update the environment in the database
+        # Since we modify env in place, we just save all
         save_environments(environments)
-        return {"status": "success", "id": id}
-    except docker.errors.NotFound:
-        # If container is not found, just update the database
-        environments = [e for e in environments if e["id"] != id]
-        save_environments(environments)
-        return {"status": "success (container not found)", "id": id}
-    except docker.errors.APIError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+
+        # Now prune deleted environments if we exceed max limit
+        prune_deleted_environments(environments, max_deleted)
+
+        return {"status": "success (moved to deleted folder)", "id": id}
 
 
 @app.get("/environments/{name}/status")
@@ -471,7 +487,7 @@ def check_image(image: str = Query(..., description="The name of the Docker imag
         return {"status": "found"}
     except docker.errors.ImageNotFound:
         raise HTTPException(status_code=404, detail="Image not found locally. Ready to pull.")
-    
+
 @app.get("/images/pull")
 def pull_image(image: str = Query(..., description="The name of the Docker image to pull")):
     def image_pull_stream():

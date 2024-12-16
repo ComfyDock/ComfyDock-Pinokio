@@ -7,7 +7,7 @@ import docker
 import re
 from filelock import FileLock, Timeout
 
-from .docker_utils import get_container
+from .docker_utils import get_container, remove_image
 
 DB_FILE = "environments.json"
 LOCK_FILE = f"{DB_FILE}.lock"
@@ -108,3 +108,58 @@ def check_environment_name(environments, env):
     # Check if name already exists
     # if any(e["name"] == env.name for e in environments):
     #     raise HTTPException(status_code=400, detail="Environment name already exists.")
+    
+def prune_deleted_environments(environments: list, max_deleted: int):
+    # Filter environments that have the 'deleted' folder
+    deleted_envs = [env for env in environments if "deleted" in env.get("folderIds", [])]
+    
+    if len(deleted_envs) <= max_deleted:
+        # No pruning needed
+        return
+
+    # Sort by deleted_at ascending (older first)
+    # If deleted_at might not exist, assume 0 or sort them last
+    deleted_envs.sort(key=lambda e: e.get("metadata", {}).get("deleted_at", 0))
+
+    # Calculate how many to remove
+    to_remove_count = len(deleted_envs) - max_deleted
+
+    # Remove the oldest ones
+    for i in range(to_remove_count):
+        env_to_remove = deleted_envs[i]
+        # Hard delete: stop container, remove container, and remove from DB
+        try:
+            hard_delete_environment(env_to_remove, environments)
+        except HTTPException as e:
+            print(f"Error hard deleting environment: {str(e)}, continuing...")
+
+    # After removal, save updates
+    save_environments(environments)
+
+def hard_delete_environment(env: dict, environments: list, timeout: int = 0):
+    """Actually remove the environment and its container."""
+    try:
+        container = get_container(env["id"])
+        container.stop(timeout=timeout)
+        container.remove()
+    except docker.errors.NotFound:
+        pass
+    except docker.errors.APIError as e:
+        # If there's an API error here, you might want to log it.
+        # Usually, you'd want to handle errors gracefully, but since
+        # this is pruning, you might raise or just print an error message.
+        print(f"API error removing container {env['id']}: {e}")
+
+    # If the environment is a duplicate, remove backing image
+    if env.get("duplicate", False):
+        try:
+            remove_image(env["image"], force=True)
+            print(f"Backing image '{env['image']}' removed.")
+        except docker.errors.ImageNotFound:
+            print(f"Backing image '{env['image']}' not found.")
+        except docker.errors.APIError as e:
+            print(f"Error removing image '{env['image']}': {e}")
+            raise HTTPException(status_code=400, detail=f"Error removing image: {str(e)}")
+
+    # Remove from environments list
+    environments.remove(env)

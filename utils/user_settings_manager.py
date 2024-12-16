@@ -16,6 +16,7 @@ class UserSettings(BaseModel):
     runtime: str = "nvidia"
     command: str = ""
     folders: list[Folder] = []
+    max_deleted_environments: int = 10
 
 def load_user_settings(default_comfyui_path: str) -> UserSettings:
     """Load user settings from a JSON file, or return default settings if the file does not exist."""
