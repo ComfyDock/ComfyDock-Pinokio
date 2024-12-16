@@ -1,5 +1,6 @@
 import json
 import time
+import uuid
 from fastapi import FastAPI, HTTPException, Query
 import docker
 from docker.types import DeviceRequest
@@ -13,14 +14,16 @@ import os
 
 from utils.comfyui_utils import check_comfyui_path, try_install_comfyui
 from utils.docker_utils import copy_directories_to_container, create_container, create_mounts, get_container, get_image, pull_image_api, remove_image, restart_container, try_pull_image
-from utils.environment_manager import Environment, EnvironmentUpdate, check_environment_name, load_environments, save_environment_to_db, save_environments
-from utils.user_settings_manager import UserSettings, load_user_settings, update_user_settings
+from utils.environment_manager import Environment, EnvironmentUpdate, check_environment_name, hard_delete_environment, load_environments, prune_deleted_environments, save_environment_to_db, save_environments
+from utils.user_settings_manager import Folder, UserSettings, load_user_settings, update_user_settings
+from utils.utils import generate_id
 
 # Constants
 FRONTEND_ORIGIN = "http://localhost:8000"
 SIGNAL_TIMEOUT = 2
 COMFYUI_PORT = 8188
 DEFAULT_COMFYUI_PATH = os.getcwd()
+DELETED_FOLDER_ID = "deleted"
 
 # Parse command-line arguments
 parser = argparse.ArgumentParser(description="Run the FastAPI app with optional ComfyUI path.")
@@ -66,10 +69,14 @@ def create_environment(env: Environment):
         runtime = "nvidia" if env.options.get("runtime", "") == "nvidia" else None
         device_requests = [DeviceRequest(count=-1, capabilities=[["gpu"]])] if runtime else None
         
+        # Create unique container name
+        container_name = f"comfy-env-{generate_id()}"
+        env.container_name = container_name
+
         # Create container
         container = create_container(
             image=env.image,
-            name=env.name,
+            name=container_name,
             command=combined_cmd,
             # runtime=runtime,
             device_requests=device_requests,
@@ -133,35 +140,40 @@ def duplicate_environment(id: str, env: Environment):
         # Get runtime and device requests
         runtime = "nvidia" if env.options.get("runtime", "") == "nvidia" else None
         device_requests = [DeviceRequest(count=-1, capabilities=[["gpu"]])] if runtime else None
+        
+        # Create unique container name
+        container_name = f"comfy-env-{generate_id()}"
+        env.container_name = container_name
 
         # Get existing container and create a unique image
         container = get_container(id)
         image_repo = "comfy-env-clone"
-        unique_tag = f"{image_repo}:{env.name}"
+        unique_image = f"{image_repo}:{container_name}"
         
+        # Create unique image
         try:
-            new_image = container.commit(repository=image_repo, tag=env.name)
-            print(f"New image created with tag '{unique_tag}': {new_image.id}")
+            new_image = container.commit(repository=image_repo, tag=container_name)
+            print(f"New image created with tag '{unique_image}': {new_image.id}")
         except docker.errors.APIError as e:
             print(f"An error occurred: {e}")
             raise HTTPException(status_code=500, detail=str(e))
 
         # Create new container
         new_container = create_container(
-            image=unique_tag,
-            name=env.name,
+            image=unique_image,
+            name=container_name,
             command=combined_cmd,
             # runtime=runtime,
             device_requests=device_requests,
             ports={f"{port}": port},
             mounts=mounts,
         )
-        print(f"New container '{env.name}' with id '{new_container.id}' created from the image.")
+        print(f"New container '{container_name}' with id '{new_container.id}' created from the image.")
         
         env.metadata = prev_env.get("metadata", {})
         env.metadata["created_at"] = time.time()
 
-        save_environment_to_db(environments, env, new_container.id, unique_tag, is_duplicate=True)
+        save_environment_to_db(environments, env, new_container.id, unique_image, is_duplicate=True)
         return {"status": "success", "container_id": new_container.id}
 
     except HTTPException:
@@ -181,15 +193,31 @@ def duplicate_environment(id: str, env: Environment):
 
 
 @app.get("/environments")
-def list_environments():
+def list_environments(folderId: str = Query(None, description="The ID of the folder to filter environments")):
     """List environments from the local database."""
-    environments = load_environments()
+    print(folderId)
+    if folderId:
+        environments = load_environments(folder_id=folderId)
+    else:
+        environments = load_environments()
     return environments
 
 
 @app.delete("/environments/{id}")
 def delete_environment(id: str):
-    """Stop and remove a Docker container and update local database."""
+    """Soft delete or hard delete a Docker environment.
+
+    Steps:
+    1. If the environment is not in the deleted folder:
+       - Add it to the deleted folder
+       - Set deleted_at timestamp in metadata
+       - Do not remove container or environment from DB permanently
+       - Prune older deleted environments if needed
+
+    2. If the environment is already in the deleted folder:
+       - Stop and remove container
+       - Remove environment from DB
+    """
     environments = load_environments()
 
     # Find the environment
@@ -197,34 +225,37 @@ def delete_environment(id: str):
     if not env:
         raise HTTPException(status_code=404, detail="Environment not found.")
 
-    try:
-        # Stop and remove the Docker container
-        container = get_container(env["id"])
-        container.stop(timeout=SIGNAL_TIMEOUT)
-        container.remove()
+    # Load user settings for max_deleted_environments
+    user_settings = load_user_settings(DEFAULT_COMFYUI_PATH)
+    max_deleted = user_settings.max_deleted_environments
 
-        # If the environment is a duplicate, try to remove its backing image
-        if env.get("duplicate", False):
-            try:
-                remove_image(env["image"], force=True)
-                print(f"Backing image '{env['image']}' removed.")
-            except docker.errors.ImageNotFound:
-                print(f"Backing image '{env['image']}' not found.")
-            except docker.errors.APIError as e:
-                print(f"Error removing image '{env['image']}': {e}")
-                raise HTTPException(status_code=400, detail=f"Error removing image: {str(e)}")
+    # Check if environment is already in the "deleted" folder
+    if DELETED_FOLDER_ID in env.get("folderIds", []):
+        # Hard delete environment, throws HTTPException if error, modifies environments in place
+        hard_delete_environment(env, environments, timeout=SIGNAL_TIMEOUT)
+        save_environments(environments)
+        return {"status": "success (permanently deleted)", "id": id}
+    else:
+        # Environment is not in the deleted folder, so we soft-delete it
+        # Add the "deleted" folder to its folderIds
+        # folder_ids = env.get("folderIds", [])
+        # if DELETED_FOLDER_ID not in folder_ids:
+        #     folder_ids.append(DELETED_FOLDER_ID)
+        env["folderIds"] = [DELETED_FOLDER_ID,]
 
-        # Update the database
-        environments = [e for e in environments if e["id"] != id]
+        # Set deleted_at timestamp in metadata
+        if "metadata" not in env:
+            env["metadata"] = {}
+        env["metadata"]["deleted_at"] = time.time()
+
+        # Update the environment in the database
+        # Since we modify env in place, we just save all
         save_environments(environments)
-        return {"status": "success", "id": id}
-    except docker.errors.NotFound:
-        # If container is not found, just update the database
-        environments = [e for e in environments if e["id"] != id]
-        save_environments(environments)
-        return {"status": "success (container not found)", "id": id}
-    except docker.errors.APIError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+
+        # Now prune deleted environments if we exceed max limit
+        prune_deleted_environments(environments, max_deleted)
+
+        return {"status": "success (moved to deleted folder)", "id": id}
 
 
 @app.get("/environments/{name}/status")
@@ -244,19 +275,21 @@ def update_environment(id: str, env: EnvironmentUpdate):
     if existing_env is None:
         raise HTTPException(status_code=404, detail="Environment not found.")
     
+    # Update folderIds
+    if env.folderIds is not None:
+        existing_env["folderIds"] = env.folderIds
+    
     # Update the environment name
     if env.name is not None:
-        if any(e["name"] == env.name for e in environments):
-            raise HTTPException(status_code=400, detail="Environment name already exists.")
-        # Try renaming the container:
-        try:
-            container = get_container(existing_env["id"])
-            container.rename(env.name)
-        except docker.errors.NotFound:
-            raise HTTPException(status_code=404, detail="Container not found.")
-        except docker.errors.APIError as e:
-            raise HTTPException(status_code=400, detail=str(e))
+        # Check if the new name already exists
+        # if any(e["name"] == env.name and e["id"] != id for e in environments):
+        #     raise HTTPException(status_code=400, detail="Environment name already exists.")
+        
+        if existing_env.get("container_name") is None:
+            existing_env["container_name"] = existing_env["name"]
+            
         existing_env["name"] = env.name
+        
     
     save_environments(environments)
     return {"status": "success", "container_id": id}
@@ -372,6 +405,65 @@ def update_user(settings: UserSettings):
     update_user_settings(settings.model_dump())
     return {"status": "success"}
 
+@app.post("/folders")
+def create_folder(folder_data: dict):
+    # folder_data = {"name": "New Folder Name"}
+    folder_id = str(uuid.uuid4())
+    settings = load_user_settings(DEFAULT_COMFYUI_PATH)
+    settings = settings.model_dump()
+    if "folders" not in settings:
+        settings["folders"] = []
+        
+    # Check folder name is not longer than 128 characters
+    if len(folder_data["name"]) > 128:
+        raise HTTPException(status_code=400, detail="Folder name is too long. Maximum length is 128 characters.")
+
+    # Ensure we don't add duplicates of default folders
+    if folder_data["name"] in [f["name"] for f in settings["folders"]]:
+        raise HTTPException(status_code=400, detail="Folder name already exists.")
+    
+    # Convert user input to Folder object
+    folder = Folder(id=folder_id, name=folder_data["name"])
+    
+    settings["folders"].append(folder)
+    update_user_settings(settings)
+    return {"id": folder_id, "name": folder_data["name"]}
+
+@app.put("/folders/{folder_id}")
+def update_folder(folder_id: str, folder_data: dict):
+    # folder_data = { "name": "New Folder Name" }
+    # Convert user input to Folder object
+    folder = Folder(id=folder_id, name=folder_data["name"])
+    settings = load_user_settings(DEFAULT_COMFYUI_PATH)
+    settings = settings.model_dump()
+    folders = settings.get("folders", [])
+    for f in folders:
+        if f["id"] == folder_id:
+            f["name"] = folder.name
+            update_user_settings(settings)
+            return {"id": folder_id, "name": folder.name}
+    raise HTTPException(status_code=404, detail="Folder not found")
+
+@app.delete("/folders/{folder_id}")
+def delete_folder(folder_id: str):
+    # Check if any environment uses this folder_id
+    environments = load_environments()
+    for env in environments:
+        if folder_id in env.get("folderIds", []):
+            raise HTTPException(status_code=400, detail="Cannot delete folder - it contains environments.")
+
+    settings = load_user_settings(DEFAULT_COMFYUI_PATH)
+    settings = settings.model_dump()
+    folders = settings.get("folders", [])
+    for i, f in enumerate(folders):
+        if f["id"] == folder_id:
+            del folders[i]
+            settings["folders"] = folders
+            update_user_settings(settings)
+            return {"status": "deleted"}
+
+    raise HTTPException(status_code=404, detail="Folder not found")
+
 @app.get("/images/tags")
 def get_image_tags():
     """Get all available image tags from Docker Hub."""
@@ -395,7 +487,7 @@ def check_image(image: str = Query(..., description="The name of the Docker imag
         return {"status": "found"}
     except docker.errors.ImageNotFound:
         raise HTTPException(status_code=404, detail="Image not found locally. Ready to pull.")
-    
+
 @app.get("/images/pull")
 def pull_image(image: str = Query(..., description="The name of the Docker image to pull")):
     def image_pull_stream():

@@ -5,12 +5,18 @@ from filelock import FileLock
 
 USER_SETTINGS_FILE = "user.settings.json"
 
+class Folder(BaseModel):
+    id: str
+    name: str
+
 # Pydantic model for user settings
 class UserSettings(BaseModel):
     comfyui_path: str
     port: int = 8188
     runtime: str = "nvidia"
     command: str = ""
+    folders: list[Folder] = []
+    max_deleted_environments: int = 10
 
 def load_user_settings(default_comfyui_path: str) -> UserSettings:
     """Load user settings from a JSON file, or return default settings if the file does not exist."""
