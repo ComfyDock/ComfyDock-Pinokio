@@ -1,4 +1,5 @@
 import argparse
+import time
 import docker
 import subprocess
 import signal
@@ -34,9 +35,10 @@ def start_container():
             container = client.containers.get(CONTAINER_NAME)
             if container.status == "running":
                 print(f"Stopping running container: {CONTAINER_NAME}")
-                container.stop()
-            print(f"Starting container: {CONTAINER_NAME}")
-            container.start()
+                container.stop(timeout=0)
+            print(f"Starting new container: {CONTAINER_NAME}")
+            time.sleep(1)
+            client.containers.run(image_name_with_tag, name=CONTAINER_NAME, ports={"8000": 8000}, detach=True, remove=True)
         except docker.errors.NotFound:
             print(f"Container {CONTAINER_NAME} not found. Running a new container.")
             # Run the container after ensuring the image is available
