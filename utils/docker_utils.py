@@ -17,7 +17,7 @@ BLACKLIST_REQUIREMENTS = ['torch']
 EXCLUDE_CUSTOM_NODE_DIRS = ['__pycache__', 'ComfyUI-Manager']
 
 try: 
-    client = docker.from_env()
+    client = docker.from_env(timeout=360) # 5 minutes timeout
 except docker.errors.DockerException:
     raise HTTPException(status_code=500, detail="Failed to connect to Docker. Please ensure your Docker client is running.")
   
