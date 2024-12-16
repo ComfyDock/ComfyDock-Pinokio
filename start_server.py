@@ -29,17 +29,18 @@ def start_container():
         print(f"Pulling image {image_name_with_tag} from Docker Hub.")
         client.images.pull(image_name_with_tag)
         
-        # Start the container
-        container = client.containers.get(CONTAINER_NAME)
-        if container.status != "running":
+        # Check if the container exists
+        try:
+            container = client.containers.get(CONTAINER_NAME)
+            if container.status == "running":
+                print(f"Stopping running container: {CONTAINER_NAME}")
+                container.stop()
             print(f"Starting container: {CONTAINER_NAME}")
             container.start()
-        else:
-            print(f"Container {CONTAINER_NAME} is already running.")
-    except docker.errors.NotFound:
-        print(f"Container {CONTAINER_NAME} not found. Checking for image {image_name_with_tag}.")
-        # Run the container after ensuring the image is available
-        client.containers.run(image_name_with_tag, name=CONTAINER_NAME, ports={"8000": 8000}, detach=True, remove=True)
+        except docker.errors.NotFound:
+            print(f"Container {CONTAINER_NAME} not found. Running a new container.")
+            # Run the container after ensuring the image is available
+            client.containers.run(image_name_with_tag, name=CONTAINER_NAME, ports={"8000": 8000}, detach=True, remove=True)
     except docker.errors.APIError as e:
         print(f"Error pulling image {image_name_with_tag}: {e}")
         raise e
