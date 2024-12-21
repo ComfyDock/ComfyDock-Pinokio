@@ -20,6 +20,7 @@ from utils.utils import generate_id
 
 # Constants
 FRONTEND_ORIGIN = "http://localhost:8000"
+FRONTEND_ORIGIN_2 = "http://127.0.0.1:8000"
 SIGNAL_TIMEOUT = 2
 COMFYUI_PORT = 8188
 DEFAULT_COMFYUI_PATH = os.getcwd()
@@ -35,7 +36,7 @@ app = FastAPI()
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[FRONTEND_ORIGIN],  # Frontend's origin
+    allow_origins=[FRONTEND_ORIGIN, FRONTEND_ORIGIN_2],  # Frontend's origin
     allow_credentials=True,
     allow_methods=["*"],  # Allow all HTTP methods (GET, POST, etc.)
     allow_headers=["*"],  # Allow all headers
