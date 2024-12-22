@@ -3,7 +3,9 @@
 ⭐ **If you find this tool helpful, please consider giving this repo a star!** ⭐
 
 
-[Notion Guide](https://cyber-damselfly-b6c.notion.site/ComfyUI-Environment-Manager-14ffd5b1ca3b804abafbdb4bd6b8068e)
+For a more in-depth guide see the [Notion Guide](https://cyber-damselfly-b6c.notion.site/ComfyUI-Environment-Manager-14ffd5b1ca3b804abafbdb4bd6b8068e)
+
+Get help instantly using my [Custom GPT!](https://chatgpt.com/g/g-676795064ce48191b20d03bf6d3b3827-comfyui-environment-manager-helper)
 
 <img src="assets/icon.png" alt="Logo" width="400"/>
 
