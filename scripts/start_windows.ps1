@@ -29,7 +29,7 @@ $PythonInstallerUrl = "https://www.python.org/ftp/python/3.12.0/python-3.12.0-am
 $GitInstallerUrl = "https://github.com/git-for-windows/git/releases/download/v2.44.0.windows.2/Git-2.44.0-64-bit.exe"
 # Adjust Git version/URL above as needed
 
-$VenvName = "venv"                                         # Name for the Python virtual env
+$VenvName = ".venv"                                         # Name for the Python virtual env
 $ReqFile  = "requirements.txt"                             # Path to your requirements file
 $ServerScript = "start_server.py"                          # Server start script
 
@@ -102,7 +102,8 @@ Write-Host "`nCreating or re-using a Python 3.12 venv..."
 
 # create venv if doesn't exist
 if (!(Test-Path $VenvName)) {
-    uv venv --python 3.12.0
+    Write-Host "creating the venv with uv"
+    uv venv $VenvName --python 3.12.0
 }
 
 # Activate the environment
@@ -167,3 +168,5 @@ By Akatz
 else {
     Write-Host "`nCould not find $ServerScript. Make sure you're in the correct repo directory."
 }
+
+pause
