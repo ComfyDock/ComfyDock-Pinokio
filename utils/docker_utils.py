@@ -293,8 +293,8 @@ def create_mounts(name: str, mount_config: dict, comfyui_path: Path):
         # Convert dir_name to a Path object
         dir_path = comfyui_path / Path(dir_name)
         if not dir_path.exists():
-            print(f"Directory does not exist: {dir_name}")
-            continue
+            print(f"Directory does not exist: {dir_name}. Creating directory.")
+            dir_path.mkdir(parents=True, exist_ok=True)
 
         # Only create a bind mount if the action is "mount"
         if action == "mount":
