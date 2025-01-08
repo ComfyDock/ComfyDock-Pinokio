@@ -129,15 +129,15 @@ def copy_to_container(container_id: str, source_path: str, container_path: str, 
 
             # Create a tar archive of the source directory or file
             with tarfile.open(tar_path, mode="w") as archive:
-                # Add each file in the source directory to the archive
-                for root, dirs, files in os.walk(source_path):
-                    # Modify dirs in-place to exclude specified directories
-                    dirs[:] = [d for d in dirs if d not in exclude_dirs]
-                    for file in files:
-                        full_path = Path(root) / file
-                        # Calculate the relative path to maintain the directory structure
-                        relative_path = full_path.relative_to(source_path)
-                        archive.add(str(full_path), arcname=str(relative_path))
+                # Use Pathlib to iterate over the source directory
+                for path in Path(source_path).rglob('*'):
+                    # Check if the path is a directory and if it should be excluded
+                    if path.is_dir() and path.name in exclude_dirs:
+                        continue
+                    # Calculate the relative path to maintain the directory structure
+                    relative_path = path.relative_to(source_path)
+                    # Add the file or directory to the archive
+                    archive.add(str(path), arcname=str(relative_path))
 
             # Send the tar archive to the container
             with open(tar_path, "rb") as tar_data:
@@ -311,13 +311,15 @@ def create_mounts(name: str, mount_config: dict, comfyui_path: Path):
             print(f"Skipping mount for {dir_name} with action: {action}")
             
     # Now we want to add one more mandatory mount for /usr/lib/wsl:/usr/lib/wsl
-    mounts.append(
-        Mount(
-            target="/usr/lib/wsl",
-            source="/usr/lib/wsl",
-            type='bind',
-            read_only=True,
+    # Only mount if the folder exists
+    if Path("/usr/lib/wsl").exists():
+        mounts.append(
+            Mount(
+                target="/usr/lib/wsl",
+                source="/usr/lib/wsl",
+                type='bind',
+                read_only=True,
+            )
         )
-    )
 
     return mounts
