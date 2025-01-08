@@ -8,3 +8,6 @@ user.settings.json
 *.pyo
 *.pyz
 utils/__pycache__
+
+*.lnk
+node_modules/
