@@ -10,6 +10,7 @@ from pathlib import Path
 from fastapi.responses import StreamingResponse
 import argparse
 import requests
+from datetime import datetime
 import os
 
 from utils.comfyui_utils import check_comfyui_path, try_install_comfyui
@@ -571,8 +572,11 @@ def stream_container_logs(id: str):
     if container.status != "running":
         raise HTTPException(status_code=400, detail="Container is not running.")
 
+    # get time container was last ran
+    container_start_time = container.attrs['State']['StartedAt']
+    container_start_time = datetime.fromisoformat(container_start_time)
     def log_generator():
-        for log in container.logs(stream=True):
+        for log in container.logs(stream=True, since=container_start_time):
             decoded_log = log.decode('utf-8')
             yield f"data: {decoded_log}\n\n"
 
