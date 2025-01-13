@@ -20,9 +20,10 @@ from utils.user_settings_manager import Folder, UserSettings, load_user_settings
 from utils.utils import generate_id
 
 # Constants
+COMFYUI_ENV_IMAGES_URL = "https://hub.docker.com/v2/namespaces/akatzai/repositories/comfyui-env/tags?page_size=100"
 FRONTEND_ORIGIN = "http://localhost:8000"
 FRONTEND_ORIGIN_2 = "http://127.0.0.1:8000"
-SIGNAL_TIMEOUT = 2
+SIGNAL_TIMEOUT = 0
 COMFYUI_PORT = 8188
 DEFAULT_COMFYUI_PATH = os.getcwd()
 DELETED_FOLDER_ID = "deleted"
@@ -53,8 +54,8 @@ def create_environment(env: Environment):
         # Check environment name is valid
         check_environment_name(environments, env)
         
-        # Check ComfyUI path is valid
-        valid_comfyui_path = check_comfyui_path(env.comfyui_path)
+        # Convert comfyui_path to Path object
+        valid_comfyui_path = Path(env.comfyui_path)
         
         # Check if the image is available locally, if not, pull it from Docker Hub
         try_pull_image(env.image)
@@ -128,11 +129,11 @@ def duplicate_environment(id: str, env: Environment):
             print(f"Environment can only be duplicated after it has been activated at least once. Please activate the environment first.")
             raise HTTPException(status_code=400, detail="An environment can only be duplicated after it has been activated at least once. Please activate the environment first.")
         
-        # Check comfyui path is valid
-        check_comfyui_path(prev_env.get("comfyui_path"))
+        # Convert comfyui_path to Path object
+        valid_comfyui_path = Path(prev_env.get("comfyui_path"))
         
         # Create mounts
-        mounts = create_mounts(env.name, env.options.get("mount_config", {}), Path(env.comfyui_path))
+        mounts = create_mounts(env.name, env.options.get("mount_config", {}), valid_comfyui_path)
         print(f"Mounts: {mounts}")
         
         # Get port and command
@@ -470,9 +471,7 @@ def delete_folder(folder_id: str):
 def get_image_tags():
     """Get all available image tags from Docker Hub."""
     try:
-        response = requests.get(
-            "https://hub.docker.com/v2/namespaces/akatzai/repositories/comfyui-env/tags?page_size=100"
-        )
+        response = requests.get(COMFYUI_ENV_IMAGES_URL)
         response.raise_for_status()  # Raise an error for bad responses
         data = response.json()
         tags = [tag['name'] for tag in data.get('results', [])]
@@ -556,7 +555,7 @@ def get_valid_comfyui_path(obj: dict):
 def install_comfyui(obj: dict):
     """Install ComfyUI at given path."""
     print(obj)
-    try_install_comfyui(obj["path"], obj["branch"])
+    try_install_comfyui(obj["path"])
     return {"status": "success"}
 
 @app.get("/environments/{id}/logs")
