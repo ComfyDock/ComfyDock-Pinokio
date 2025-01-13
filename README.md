@@ -145,6 +145,12 @@ https://github.com/user-attachments/assets/ac2880f6-55b8-4b03-97e8-8ba0f86de87e
   \\wsl.localhost\<distro>\<path-to-directory>
   ```
 
+### Dependencies:
+
+https://github.com/akatz-ai/ComfyUI-Environment-Docker
+
+https://github.com/akatz-ai/ComfyUI-Environment-Frontend
+
 <br>
 
 ## 👨‍💻 **About the Author**
