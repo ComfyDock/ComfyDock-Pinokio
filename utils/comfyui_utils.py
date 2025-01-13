@@ -31,6 +31,39 @@ def try_install_comfyui(path: str, branch: str = "master"):
         raise HTTPException(status_code=400, detail=f"Failed to clone ComfyUI repository to {comfyui_dir}.")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error during ComfyUI installation: {str(e)}")
+    
+
+def is_comfyui_repo(path: str) -> bool:
+    """
+    Returns True if `path` points to a directory that appears
+    to be a valid ComfyUI repo.
+    """
+    repo_path = Path(path)
+    
+    print(repo_path)
+
+    # Ensure the path is a directory
+    if not repo_path.is_dir():
+        return False
+
+    # Check for required files and directories
+    required_files = ["main.py"]
+    required_dirs = ["models", "comfy", "comfy_execution", "web"]
+
+    for file_name in required_files:
+        print(file_name)
+        if not (repo_path / file_name).is_file():
+            print("file not found")
+            return False
+
+    for dir_name in required_dirs:
+        print(dir_name)
+        if not (repo_path / dir_name).is_dir():
+            print("dir not found")
+            return False
+
+    return True
+
 
 def check_comfyui_path(path: str):
     """Check if the ComfyUI path is valid and handle installation if needed. Returns the Path to the ComfyUI directory."""
@@ -42,9 +75,6 @@ def check_comfyui_path(path: str):
     if not comfyui_path.is_dir():
         raise HTTPException(status_code=400, detail=f"ComfyUI path is not a directory: {path}.")
     
-    if not comfyui_path.name.endswith("ComfyUI"):
-        comfyui_dir = comfyui_path / "ComfyUI"
-        if not comfyui_dir.exists():
-            raise HTTPException(status_code=400, detail="No valid ComfyUI installation found.")
-        return comfyui_dir
+    if not is_comfyui_repo(path):
+        raise HTTPException(status_code=400, detail="No valid ComfyUI installation found.")
     return comfyui_path
