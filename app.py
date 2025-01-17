@@ -61,7 +61,7 @@ def create_environment(env: Environment):
         try_pull_image(env.image)
         
         # Create mounts
-        mounts = create_mounts(env.name, env.options.get("mount_config", {}), valid_comfyui_path)
+        mounts = create_mounts(env.options.get("mount_config", {}), valid_comfyui_path)
         print(f"Mounts: {mounts}")
         
         # Get port and command
@@ -133,7 +133,7 @@ def duplicate_environment(id: str, env: Environment):
         valid_comfyui_path = Path(prev_env.get("comfyui_path"))
         
         # Create mounts
-        mounts = create_mounts(env.name, env.options.get("mount_config", {}), valid_comfyui_path)
+        mounts = create_mounts(env.options.get("mount_config", {}), valid_comfyui_path)
         print(f"Mounts: {mounts}")
         
         # Get port and command

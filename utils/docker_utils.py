@@ -155,41 +155,170 @@ def copy_to_container(container_id: str, source_path: str, container_path: str, 
         print(f"Docker API error: {e}")
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
+        
+        
+def convert_old_to_new_style(old_config: dict, comfyui_path: Path) -> dict:
+    """
+    Convert old style config like:
+    {
+      "user": "mount",
+      "models": "mount",
+      "output": "mount",
+      "input": "mount"
+    }
+    into new style:
+    {
+      "mounts": [
+        {
+          "container_path": "/app/ComfyUI/user",
+          "host_path": "/path/to/comfyui/user",
+          "type": "mount",
+          "read_only": false
+        },
+        ...
+      ]
+    }
+
+    Note: This function interprets each key as a subdirectory of comfyui_path,
+    with the same subdirectory name inside the container. Feel free to customize
+    how you decide the container_path.
+    """
+
+    new_config = {"mounts": []}
+
+    for key, action in old_config.items():
+        # only convert if action == "mount" or "copy"
+        if action != "mount" and action != "copy":
+            continue
+
+        # for old style, assume local directory is comfyui_path / key
+        host_subdir = (comfyui_path / key).resolve()
+
+        # container directory is /app/ComfyUI/key
+        container_subdir = Path(CONTAINER_COMFYUI_PATH) / key
+
+        # build a new style record
+        mount_entry = {
+            "container_path": container_subdir.as_posix(),
+            "host_path": host_subdir.as_posix(),
+            "type": "mount",
+            "read_only": False
+        }
+        new_config["mounts"].append(mount_entry)
+
+    return new_config
+
+
+def _process_copy_mount(mount: dict, comfyui_path: Path, container_id: str):
+    """
+    Processes a single mount entry with type 'copy'.
+    Creates the source directory if needed (if relative) and copies data into the container.
+    """
+    host_path_str = mount.get("host_path")
+    container_path = mount.get("container_path")
+    if not host_path_str or not container_path:
+        print(f"Skipping mount entry because host_path or container_path is missing: {mount}")
+        return False
+
+    source_path = Path(host_path_str)
+    if not source_path.is_absolute():
+        source_path = (comfyui_path / source_path).resolve()
+
+    if source_path.exists():
+        print(f"Copying {source_path} to container at {container_path}")
+        copy_to_container(container_id, str(source_path), container_path, EXCLUDE_CUSTOM_NODE_DIRS)
+        # If copying custom_nodes, run additional installation
+        if "custom_nodes" in container_path:
+            install_custom_nodes(container_id, BLACKLIST_REQUIREMENTS, EXCLUDE_CUSTOM_NODE_DIRS)
+            return True
+    else:
+        print(f"Local path does not exist: {source_path}")
+    return False
+
+def _process_mount_mount(mount: dict, comfyui_path: Path, container_id: str):
+    """
+    For backward compatibility:
+    If the type is "mount" and it's "custom_nodes", call install_custom_nodes.
+    This function can be extended if more mount-specific processing is needed.
+    """
+    if mount.get("type") == "mount" and "custom_nodes" in mount.get("container_path", ""):
+        install_custom_nodes(container_id, BLACKLIST_REQUIREMENTS, EXCLUDE_CUSTOM_NODE_DIRS)
+        return True
+    return False
 
 def copy_directories_to_container(container_id: str, comfyui_path: Path, mount_config: dict):
-    """Copy specified directories from the host to the container based on the mount configuration."""
-    path_mapping = {
-        "custom_nodes": "custom_nodes",
-        "user": "user",
-        "models": "models",
-        "output": "output",
-        "input": "input"
-    }
-    installed_custom_nodes = False
+    """
+    Copy specified directories from the host to the container based on the mount configuration.
     
-    print(f'mount_config: {mount_config}')
+    Supports:
+      - New style: {"mounts": [ { "host_path": ..., "container_path": ..., "type": "copy" or "mount", ... }, ... ]}
+      - Old style: { "models": "copy", "user": "mount", ... }
+    
+    For old style, known keys are mapped to subdirectories of comfyui_path and /app/ComfyUI.
+    """
+    installed_custom_nodes = False
 
-    for key, action in mount_config.items():
+    print(f'copy_directories_to_container: mount_config: {mount_config}')
+
+    # Determine config style. If "mounts" key exists and is a list, assume new style.
+    if "mounts" in mount_config and isinstance(mount_config["mounts"], list):
+        config = mount_config
+    else:
+        print("Detected old style mount config. Converting to new style.")
+        config = convert_old_to_new_style(mount_config, comfyui_path)
+
+    print(f"Using mount config: {config}")
+
+    for mount in config.get("mounts", []):
+        action = mount.get("type", "").lower()
         if action == "copy":
-            dir_name = path_mapping.get(key, key)
-            local_path = comfyui_path / Path(dir_name)
-            container_path = (Path(CONTAINER_COMFYUI_PATH) / Path(dir_name)).as_posix()
-            print(f"dirname: {dir_name}, copying {local_path} to {container_path}")
-
-            if local_path.exists():
-                print(f"Copying {local_path} to container at {container_path}")
-                copy_to_container(container_id, str(local_path), str(container_path), EXCLUDE_CUSTOM_NODE_DIRS)
-                if key == "custom_nodes":
-                    install_custom_nodes(container_id, BLACKLIST_REQUIREMENTS, EXCLUDE_CUSTOM_NODE_DIRS)
+            if _process_copy_mount(mount, comfyui_path, container_id):
+                # If the mount relates to custom_nodes, flag it as installed
+                if "custom_nodes" in mount.get("container_path", ""):
                     installed_custom_nodes = True
-            else:
-                print(f"Local path does not exist: {local_path}")
-        if action == "mount":
-            if key == "custom_nodes":
-                install_custom_nodes(container_id, BLACKLIST_REQUIREMENTS, EXCLUDE_CUSTOM_NODE_DIRS)
+        elif action == "mount":
+            # For mount actions, if it's custom_nodes and you want to run install_custom_nodes,
+            # handle it here.
+            if _process_mount_mount(mount, comfyui_path, container_id):
                 installed_custom_nodes = True
 
     return installed_custom_nodes
+
+
+# def copy_directories_to_container(container_id: str, comfyui_path: Path, mount_config: dict):
+#     """Copy specified directories from the host to the container based on the mount configuration."""
+#     path_mapping = {
+#         "custom_nodes": "custom_nodes",
+#         "user": "user",
+#         "models": "models",
+#         "output": "output",
+#         "input": "input"
+#     }
+#     installed_custom_nodes = False
+    
+#     print(f'mount_config: {mount_config}')
+
+#     for key, action in mount_config.items():
+#         if action == "copy":
+#             dir_name = path_mapping.get(key, key)
+#             local_path = comfyui_path / Path(dir_name)
+#             container_path = (Path(CONTAINER_COMFYUI_PATH) / Path(dir_name)).as_posix()
+#             print(f"dirname: {dir_name}, copying {local_path} to {container_path}")
+
+#             if local_path.exists():
+#                 print(f"Copying {local_path} to container at {container_path}")
+#                 copy_to_container(container_id, str(local_path), str(container_path), EXCLUDE_CUSTOM_NODE_DIRS)
+#                 if key == "custom_nodes":
+#                     install_custom_nodes(container_id, BLACKLIST_REQUIREMENTS, EXCLUDE_CUSTOM_NODE_DIRS)
+#                     installed_custom_nodes = True
+#             else:
+#                 print(f"Local path does not exist: {local_path}")
+#         if action == "mount":
+#             if key == "custom_nodes":
+#                 install_custom_nodes(container_id, BLACKLIST_REQUIREMENTS, EXCLUDE_CUSTOM_NODE_DIRS)
+#                 installed_custom_nodes = True
+
+#     return installed_custom_nodes
 
 def install_custom_nodes(container_id: str, blacklist: list = [], exclude_dirs: list = []):
     """Install custom nodes by executing pip install for each requirements.txt in the container."""
@@ -265,61 +394,110 @@ def restart_container(container_id: str):
     except docker.errors.APIError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-def create_mounts(name: str, mount_config: dict, comfyui_path: Path):
-    """Create bind mounts for the container based on the mount configuration."""
-    print(f"Creating mounts for environment: {name}")
+
+def _create_mounts_from_new_config(mount_config: dict, comfyui_path: Path):
+    """
+    The 'new-style' function that expects:
+    {
+      "mounts": [
+        {
+          "container_path": "/app/ComfyUI/models",
+          "host_path": "C:\\path\\to\\my\\shared\\models\\drive\\directory",
+          "type": "mount",
+          "read_only": false
+        },
+        ...
+      ]
+    }
+    """
+
+    print(f"Creating mounts for environment")
     mounts = []
 
-    # Mapping from config keywords to actual path names
-    path_mapping = {
-        "custom_nodes": "custom_nodes",
-        "user": "user",
-        "models": "models",
-        "output": "output",
-        "input": "input"
-    }
+    user_mounts = mount_config.get("mounts", [])
+    for m in user_mounts:
+        action = m.get("type", "").lower()
+        if action != "mount" and action != "copy":
+            print(f"Skipping mount for {m} because type is '{action}' (not 'mount' or 'copy').")
+            continue
 
-    # Retrieve the mount configuration from the environment options
-    print(f'mount_config: {mount_config}')
-    print(f'type of mount_config: {type(mount_config)}')
+        container_path = m.get("container_path")
+        host_path = m.get("host_path")
 
-    for key, action in mount_config.items():
-        # Translate the config keyword to the actual path name
-        dir_name = path_mapping.get(key)
-        if not dir_name:
-            print(f"Unknown directory key: {key}")
-            dir_name = key
+        if not container_path or not host_path:
+            print(f"Skipping entry {m} because container_path or host_path is missing.")
+            continue
 
-        # Convert dir_name to a Path object
-        dir_path = comfyui_path / Path(dir_name)
-        if not dir_path.exists():
-            print(f"Directory does not exist: {dir_name}. Creating directory.")
-            dir_path.mkdir(parents=True, exist_ok=True)
+        # If host_path is relative, interpret it as relative to comfyui_path
+        source_path = Path(host_path)
+        if not source_path.is_absolute():
+            source_path = comfyui_path / source_path
 
-        # Only create a bind mount if the action is "mount"
-        if action == "mount":
-            container_path = (Path(CONTAINER_COMFYUI_PATH) / Path(dir_name)).as_posix()
-            mounts.append(
-                Mount(
-                    target=str(container_path),
-                    source=str(dir_path),
-                    type='bind',
-                    read_only=False,
-                )
+        # Ensure the source directory exists (create if needed)
+        if not source_path.exists():
+            print(f"Host directory does not exist: {source_path}. Creating directory.")
+            source_path.mkdir(parents=True, exist_ok=True)
+
+        # Convert paths to posix-style strings for Docker
+        source_str = source_path.resolve().as_posix()
+        target_str = Path(container_path).as_posix()
+        read_only = m.get("read_only", False)
+
+        print(f"Mounting host '{source_str}' to container '{target_str}' (read_only={read_only})")
+
+        mounts.append(
+            Mount(
+                target=target_str,
+                source=source_str,
+                type='bind',
+                read_only=read_only
             )
-        else:
-            print(f"Skipping mount for {dir_name} with action: {action}")
-            
-    # Now we want to add one more mandatory mount for /usr/lib/wsl:/usr/lib/wsl
-    # Only mount if the folder exists
-    if Path("/usr/lib/wsl").exists():
+        )
+
+    # Optionally add /usr/lib/wsl -> /usr/lib/wsl mount if it exists
+    wsl_path = Path("/usr/lib/wsl")
+    if wsl_path.exists():
         mounts.append(
             Mount(
                 target="/usr/lib/wsl",
-                source="/usr/lib/wsl",
+                source=str(wsl_path),
                 type='bind',
                 read_only=True,
             )
         )
 
     return mounts
+
+def create_mounts(mount_config: dict, comfyui_path: Path):
+    """
+    Main function that is backwards-compatible with old style config, and also supports new style.
+
+    For old style, e.g.:
+    {
+      "user": "mount",
+      "models": "mount",
+      "output": "mount",
+      "input": "mount"
+    }
+
+    For new style, e.g.:
+    {
+      "mounts": [
+        {
+          "container_path": "/app/ComfyUI/models",
+          "host_path": "C:\\path\\to\\my\\shared\\models\\drive\\directory",
+          "type": "mount",
+          "read_only": false
+        },
+        ...
+      ] 
+    }
+    """
+
+    config = mount_config
+    if "mounts" not in config or not isinstance(config["mounts"], list):
+        # We'll assume it's old style and convert
+        print("Detected old style mount config. Converting to new style.")
+        config = convert_old_to_new_style(mount_config, comfyui_path)
+        
+    return _create_mounts_from_new_config(config, comfyui_path)
