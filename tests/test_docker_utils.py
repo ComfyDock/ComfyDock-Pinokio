@@ -100,7 +100,7 @@ class TestMountConversion(unittest.TestCase):
 
         self.assertEqual(len(test_mounts), 1)
         mount_obj = test_mounts[0]
-        expected_source = target_dir.resolve().as_posix()
+        expected_source = str(target_dir.resolve())
         self.assertEqual(mount_obj["Source"], expected_source)
         self.assertEqual(mount_obj["Target"], f"{CONTAINER_COMFYUI_PATH}/models")
         self.assertEqual(mount_obj["Type"], "bind")
@@ -126,13 +126,56 @@ class TestMountConversion(unittest.TestCase):
             test_mounts = [m for m in mounts if m["Target"] == f"{CONTAINER_COMFYUI_PATH}/models"]
             self.assertEqual(len(test_mounts), 1)
             mount_obj = test_mounts[0]
-            expected_source = Path(abs_temp_dir).resolve().as_posix()
+            expected_source = str(Path(abs_temp_dir).resolve())
             self.assertEqual(mount_obj["Source"], expected_source)
             self.assertEqual(mount_obj["Target"], f"{CONTAINER_COMFYUI_PATH}/models")
             self.assertEqual(mount_obj["Type"], "bind")
             self.assertTrue(mount_obj["ReadOnly"])
         finally:
             shutil.rmtree(abs_temp_dir)
+            
+    def test_create_mounts_from_new_config_with_posix_style_absolute_path(self):
+        """
+        Verifies that a POSIX-style absolute path (e.g. /tmp/custom_models) is
+        handled correctly on Windows (or any OS).
+        """
+        posix_abs_path = "/tmp/custom_models"
+
+        new_config = {
+            "mounts": [
+                {
+                    "container_path": f"{CONTAINER_COMFYUI_PATH}/models",
+                    "host_path": posix_abs_path,  # POSIX-style absolute path
+                    "type": "mount",
+                    "read_only": True
+                }
+            ]
+        }
+
+        mounts = _create_mounts_from_new_config(new_config, self.comfyui_path)
+        # Filter the mount for our container path
+        test_mounts = [m for m in mounts if m["Target"] == f"{CONTAINER_COMFYUI_PATH}/models"]
+
+        self.assertEqual(len(test_mounts), 1)
+        mount_obj = test_mounts[0]
+
+        # On Windows, Path("/tmp/custom_models") is considered absolute, so it shouldn't
+        # get joined to comfyui_path. Instead, you should see something like "C:\\tmp\\custom_models"
+        # for mount_obj["Source"], if you're on Windows, or "/tmp/custom_models" if on Linux/macOS.
+        # We'll just check that it ends with "tmp/custom_models" for cross-platform consistency.
+        self.assertTrue(mount_obj["Source"].replace("\\", "/").endswith("tmp/custom_models"))
+
+        self.assertEqual(mount_obj["Target"], f"{CONTAINER_COMFYUI_PATH}/models")
+        self.assertEqual(mount_obj["Type"], "bind")
+        self.assertTrue(mount_obj["ReadOnly"])
+
+        # Additionally, verify that the directory actually got created.
+        # This will exist at something like C:/tmp/custom_models on Windows or /tmp/custom_models on *nix
+        source_path = Path(mount_obj["Source"])
+        self.assertTrue(source_path.exists())
+        
+        # Cleanup: remove it now that we're done
+        shutil.rmtree(source_path, ignore_errors=True)
 
     def test_create_mounts_backwards_compatibility(self):
         # Test create_mounts with an old style config.

@@ -416,6 +416,7 @@ def _create_mounts_from_new_config(mount_config: dict, comfyui_path: Path):
 
     user_mounts = mount_config.get("mounts", [])
     for m in user_mounts:
+        print(f"Mount: {m}")
         action = m.get("type", "").lower()
         if action != "mount" and action != "copy":
             print(f"Skipping mount for {m} because type is '{action}' (not 'mount' or 'copy').")
@@ -430,8 +431,10 @@ def _create_mounts_from_new_config(mount_config: dict, comfyui_path: Path):
 
         # If host_path is relative, interpret it as relative to comfyui_path
         source_path = Path(host_path)
+        print(f"source_path: {source_path}")
         if not source_path.is_absolute():
             source_path = comfyui_path / source_path
+            print(f"source_path: {source_path}")
 
         # Ensure the source directory exists (create if needed)
         if not source_path.exists():
@@ -439,8 +442,10 @@ def _create_mounts_from_new_config(mount_config: dict, comfyui_path: Path):
             source_path.mkdir(parents=True, exist_ok=True)
 
         # Convert paths to posix-style strings for Docker
-        source_str = source_path.resolve().as_posix()
-        target_str = Path(container_path).as_posix()
+        source_str = str(source_path.resolve())
+        print(f"source_str: {source_str}")
+        target_str = str(Path(container_path).as_posix())
+        print(f"target_str: {target_str}")
         read_only = m.get("read_only", False)
 
         print(f"Mounting host '{source_str}' to container '{target_str}' (read_only={read_only})")
