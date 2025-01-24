@@ -12,6 +12,7 @@ import argparse
 import requests
 from datetime import datetime
 import os
+from dateutil import parser as dateutil_parser
 
 from utils.comfyui_utils import check_comfyui_path, try_install_comfyui
 from utils.docker_utils import copy_directories_to_container, create_container, create_mounts, get_container, get_image, pull_image_api, remove_image, restart_container, try_pull_image
@@ -573,7 +574,7 @@ def stream_container_logs(id: str):
 
     # get time container was last ran
     container_start_time = container.attrs['State']['StartedAt']
-    container_start_time = datetime.fromisoformat(container_start_time)
+    container_start_time = dateutil_parser.parse(container_start_time)
     def log_generator():
         for log in container.logs(stream=True, since=container_start_time):
             decoded_log = log.decode('utf-8')

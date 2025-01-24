@@ -3,3 +3,4 @@ pydantic
 docker
 uvicorn
 filelock
+python-dateutil
