@@ -11,7 +11,7 @@ client = docker.from_env()
 # Container and server details
 CONTAINER_NAME = "comfy-env-frontend"
 IMAGE_NAME = "akatzai/comfy-env-frontend"
-FRONTEND_IMAGE_VERSION = "0.4.2"
+FRONTEND_IMAGE_VERSION = "0.5.0"
 
 def parse_arguments():
     """Parse command-line arguments."""
