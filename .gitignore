@@ -11,3 +11,7 @@ utils/__pycache__
 
 *.lnk
 node_modules/
+
+ComfyUI/
+.DS_Store
+*.lock
