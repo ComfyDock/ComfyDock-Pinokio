@@ -1,172 +1,251 @@
 <#
 .SYNOPSIS
-  Bootstrap script to set up Python 3.12, Git, update repo, create
-  a virtual environment, install dependencies, and run start_server.py.
+  Bootstrap script to set up Git, update the repo, install 'uv',
+  create a virtual environment, install dependencies, and run start_server.py.
 
 .DESCRIPTION
-  1. Checks if python is available, if not installs Python 3.12.
-  2. Checks if git is available, if not installs git.
-  3. Update local repo if not already
-  4. Installs uv for package management.
-  5. Creates/activates a Python 3.12 virtual env (idempotent).
-  6. Installs required packages
-  7. runs start_server.py.
-
+  1. Checks if git is available; if not, tries to silently install Git for Windows.
+  2. Update local repo (git pull) if it's a valid Git repository.
+  3. Checks if 'uv' is installed; if not, downloads and installs it via PowerShell script.
+  4. Creates/activates a '.venv' environment using 'uv'.
+  5. Installs dependencies from 'requirements.txt' using 'uv pip' if present.
+  6. Runs 'start_server.py' in the background, displays an ASCII banner and link, 
+     and attempts to open the link in the default browser.
 #>
 
-# Get the script's directory and set the working directory to the project directory
-$scriptPath = $MyInvocation.MyCommand.Path
-$scriptDir = Split-Path -Parent $scriptPath
-$projectDir = Split-Path -Parent $scriptDir
+###############################################################################
+# 0. Define Variables
+###############################################################################
+
+$scriptPath     = $MyInvocation.MyCommand.Path
+$scriptDir      = Split-Path -Parent $scriptPath
+$projectDir     = Split-Path -Parent $scriptDir
 Set-Location -Path $projectDir
 
-# -----------------------------
-# 0. Define some variables
-# -----------------------------
-$PythonInstallerUrl = "https://www.python.org/ftp/python/3.12.0/python-3.12.0-amd64.exe" 
-# Adjust the Python version/URL above as needed
-
 $GitInstallerUrl = "https://github.com/git-for-windows/git/releases/download/v2.44.0.windows.2/Git-2.44.0-64-bit.exe"
-# Adjust Git version/URL above as needed
+$UvInstallScriptUrl = "https://astral.sh/uv/install.ps1" # Official UV Windows script URL
 
-$VenvName = ".venv"                                         # Name for the Python virtual env
-$ReqFile  = "requirements.txt"                             # Path to your requirements file
-$ServerScript = "start_server.py"                          # Server start script
+$VenvName     = ".venv"
+$ReqFile      = "requirements.txt"
+$ServerScript = "start_server.py"
 
-# -----------------------------
-# 1. Check if Python is installed
-# -----------------------------
-Write-Host "`nChecking for Python..."
-$pythonCheck = (Get-Command python -ErrorAction SilentlyContinue)
 
-if (!$pythonCheck) {
-    Write-Host "Python not found. Installing Python..."
+###############################################################################
+# 1. Check if Git is installed
+###############################################################################
 
-    # Download Python installer
-    Invoke-WebRequest -Uri $PythonInstallerUrl -OutFile "python-installer.exe"
+Write-Host ""
+Write-Host "============================="
+Write-Host "== 1. Check if Git is installed"
+Write-Host "============================="
 
-    # Silent install (requires admin privileges)
-    Start-Process -FilePath ".\python-installer.exe" -ArgumentList "/quiet InstallAllUsers=1 PrependPath=1" -Wait
+$gitCheck = Get-Command git -ErrorAction SilentlyContinue
+if (-not $gitCheck) {
+    Write-Host "Git not found on your system."
 
-    # Optional: remove installer after install
-    # Remove-Item ".\python-installer.exe"
+    # Try silent install from GitInstallerUrl
+    try {
+        Write-Host "Downloading Git installer from $GitInstallerUrl ..."
+        Invoke-WebRequest -Uri $GitInstallerUrl -OutFile "git-installer.exe" -UseBasicParsing
+        Write-Host "Git installer downloaded."
 
-    # Let the user know they might need to open a new PowerShell for the PATH to update
-    Write-Host "`nPython installation finished. You may need to open a new PowerShell session if 'python' isn't recognized."
-}
-else {
-    Write-Host "Python is already installed."
-}
+        Write-Host "Installing Git silently..."
+        Start-Process -FilePath ".\git-installer.exe" -ArgumentList "/VERYSILENT" -Wait -NoNewWindow
+        Remove-Item ".\git-installer.exe" -ErrorAction SilentlyContinue
 
-# -----------------------------
-# 2. Check if Git is installed
-# -----------------------------
-Write-Host "`nChecking for Git..."
-$gitCheck = (Get-Command git -ErrorAction SilentlyContinue)
-
-if (!$gitCheck) {
-    Write-Host "Git not found. Installing Git..."
-
-    # Download Git installer
-    Invoke-WebRequest -Uri $GitInstallerUrl -OutFile "git-installer.exe"
-
-    # Silent install
-    Start-Process -FilePath ".\git-installer.exe" -ArgumentList "/VERYSILENT" -Wait
-
-    # Optional: remove installer after install
-    # Remove-Item ".\git-installer.exe"
-
-    Write-Host "`nGit installation finished. You may need to open a new PowerShell session if 'git' isn't recognized."
+        Write-Host "Git installed successfully. You may need to open a new PowerShell session if 'git' isn't recognized."
+    }
+    catch {
+        Write-Host "Failed to install Git silently. Error: $_"
+        exit 1
+    }
 }
 else {
     Write-Host "Git is already installed."
 }
 
-# -----------------------------
-# 3. Update local repo
-# -----------------------------
-Write-Host "`nPulling latest changes..."
-git pull
+###############################################################################
+# 2. Update local repo (git pull)
+###############################################################################
 
-# -----------------------------
-# 4. Install uv
-# -----------------------------
-Write-Host "`nInstalling uv package manager..."
-python -m pip install --upgrade pip
-python -m pip install uv
+Write-Host ""
+Write-Host "============================="
+Write-Host "== 2. Update local repo (git pull)"
+Write-Host "============================="
 
-# ------------------------------------
-# 5. Create a Python 3.12 venv (idempotent)
-# ------------------------------------
-Write-Host "`nCreating or re-using a Python 3.12 venv..."
-
-# create venv if doesn't exist
-if (!(Test-Path $VenvName)) {
-    Write-Host "creating the venv with uv"
-    uv venv $VenvName --python 3.12.0
+try {
+    git rev-parse --is-inside-work-tree | Out-Null
+    Write-Host "Pulling latest changes from the repository..."
+    git pull
+    Write-Host "Repository updated successfully."
+}
+catch {
+    Write-Host "Current directory is not a Git repository. Skipping git pull."
 }
 
-# Activate the environment
-# Note: For PowerShell, you typically do: .\venv\Scripts\Activate.ps1
-#       For cmd.exe, do: .\venv\Scripts\activate.bat
-Write-Host "Activating virtual environment..."
-. ".\$VenvName\Scripts\Activate.ps1"
+###############################################################################
+# 3. Install uv (Package manager)
+###############################################################################
 
-Write-Host "Using Python version:"
-uv run python --version
+Write-Host ""
+Write-Host "============================="
+Write-Host "== 3. Install uv"
+Write-Host "============================="
 
-# -----------------------------
-# 6. Install requirements
-# -----------------------------
-if (Test-Path $ReqFile) {
-    Write-Host "`nInstalling requirements from $ReqFile..."
-    uv pip install -r $ReqFile
+$uvCheck = Get-Command uv -ErrorAction SilentlyContinue
+if (-not $uvCheck) {
+    Write-Host "'uv' not found. Installing 'uv' using the official PowerShell install script..."
+
+    try {
+        Write-Host "Downloading uv install script from $UvInstallScriptUrl ..."
+        # Grab the script, then invoke it
+        $uvScriptContent = Invoke-WebRequest -Uri $UvInstallScriptUrl -UseBasicParsing
+        Write-Host "UV install script downloaded. Executing..."
+        Invoke-Expression $uvScriptContent.Content
+        Write-Host "'uv' installed successfully."
+    }
+    catch {
+        Write-Host "Failed to install 'uv'. Visit https://uv.sh/docs/ for manual installation instructions."
+        exit 1
+    }
 }
 else {
-    Write-Host "`nNo $ReqFile file found; skipping 'pip install -r $ReqFile'."
+    Write-Host "'uv' is already installed."
 }
 
-# -----------------------------
-# 7. Run start_server.py
-# -----------------------------
-if (Test-Path $ServerScript) {
-    Write-Host "`nStarting server..."
+###############################################################################
+# 4. Create (or reuse) a uv-based virtual environment
+###############################################################################
 
-    # Use cmd.exe to run "uv run python start_server.py"
-    Start-Process -FilePath "cmd.exe" `
-        -ArgumentList "/c uv run python $ServerScript" `
-        -NoNewWindow `
-        -PassThru | Out-Null
+Write-Host ""
+Write-Host "============================="
+Write-Host "== 4. Create (or reuse) uv-based venv"
+Write-Host "============================="
 
-    # ASCII art banner
-    $asciiArt = @"
-  ___  __   _  _  ____  _  _  _  _  __    ____  __ _  _  _  __  ____   __   __ _  _  _  ____  __ _  ____ 
- / __)/  \ ( \/ )(  __)( \/ )/ )( \(  )  (  __)(  ( \/ )( \(  )(  _ \ /  \ (  ( \( \/ )(  __)(  ( \(_  _)
-( (__(  O )/ \/ \ ) _)  )  / ) \/ ( )(    ) _) /    /\ \/ / )(  )   /(  O )/    // \/ \ ) _) /    /  )(  
- \___)\__/ \_)(_/(__)  (__/  \____/(__)  (____)\_)__) \__/ (__)(__\_) \__/ \_)__)\_)(_/(____)\_)__) (__) 
- _  _   __   __ _   __    ___  ____  ____                                                                
-( \/ ) / _\ (  ( \ / _\  / __)(  __)(  _ \                                                               
-/ \/ \/    \/    //    \( (_ \ ) _)  )   /                                                               
-\_)(_/\_/\_/\_)__)\_/\_/ \___/(____)(__\_)
+if (-not (Test-Path $VenvName)) {
+    Write-Host "Creating the virtual environment with 'uv'..."
+    try {
+        uv venv "$VenvName"
+        Write-Host "Virtual environment created."
+    }
+    catch {
+        Write-Host "Failed to create virtual environment with 'uv'. Ensure 'uv' is installed correctly."
+        exit 1
+    }
+}
+else {
+    Write-Host "Virtual environment '$VenvName' already exists; reusing it..."
+}
 
-By Akatz                                                                                                                                                                                
+###############################################################################
+# 5. Install requirements (if present)
+###############################################################################
+
+Write-Host ""
+Write-Host "============================="
+Write-Host "== 5. Install requirements"
+Write-Host "============================="
+
+if (Test-Path $ReqFile) {
+    Write-Host "Installing dependencies from $ReqFile..."
+    try {
+        uv pip install -r $ReqFile
+        Write-Host "Dependencies installed successfully."
+    }
+    catch {
+        Write-Host "Failed to install dependencies from '$ReqFile'."
+        exit 1
+    }
+}
+else {
+    Write-Host "No $ReqFile file found; skipping 'uv pip install -r $ReqFile'."
+}
+
+###############################################################################
+# 6. Print ASCII Art and Link Banner, Attempt to Open Browser
+###############################################################################
+
+Write-Host ""
+Write-Host "============================="
+Write-Host "== 6. Prepare to Run start_server.py"
+Write-Host "============================="
+
+if (-not (Test-Path $ServerScript)) {
+    Write-Host "Could not find '$ServerScript'. Make sure you're in the correct repository directory."
+    exit 0
+}
+
+Write-Host "Server script '$ServerScript' found. Preparing to start..."
+
+# ASCII art banner
+$asciiArt = @"
+      ___  __   _  _  ____  _  _  _  _  __    ____  __ _  _  _  __  ____   __   __ _  _  _  ____  __ _  ____ 
+     / __)/  \ ( \/ )(  __)( \/ )/ )( \(  )  (  __)(  ( \/ )( \(  )(  _ \ /  \ (  ( \( \/ )(  __)(  ( \(_  _)
+    ( (__(  O )/ \/ \ ) _)  )  / ) \/ ( )(    ) _) /    /\ \/ / )(  )   /(  O )/    // \/ \ ) _) /    /  )(  
+     \___)\__/ \_)(_/(__)  (__/  \____/(__)  (____)\_)__) \__/ (__)(__\_) \__/ \_)__)\_)(_/(____)\_)__) (__)
+     _  _   __   __ _   __    ___  ____  ____                                                                
+    ( \/ ) / _\ (  ( \ / _\  / __)(  __)(  _ \                                                               
+    / \/ \/    \/    //    \( (_ \ ) _)  )   /                                                               
+    \_)(_/\_/\_/\_)__)\_/\_/ \___/(____)(__\_)
+    
+    By Akatz
 "@
 
-    Write-Host "`n$asciiArt" -ForegroundColor Yellow
+Write-Host "`n$asciiArt" -ForegroundColor Yellow
 
-    # Notify the user with a bordered link
-    $link = "http://localhost:8000"
-    $borderLength = $link.Length + 8
-    $border = '*' * $borderLength
+# Link banner
+$link = "http://localhost:8000"
+$borderLen = $link.Length + 8
+$border = '*' * $borderLen
 
-    Write-Host "`n$border" -ForegroundColor Green
-    Write-Host "*   $link   *" -ForegroundColor Green
-    Write-Host "$border" -ForegroundColor Green
+Write-Host ""
+Write-Host $border
+Write-Host "*   $link   *"
+Write-Host $border
 
-    Write-Host "`nComfyUI Environment Manager is running! Open the above link in your browser."
+Write-Host ""
+Write-Host "ComfyUI Environment Manager is ready! Open the link above in your browser."
+Write-Host "When you run the server below, you can press Ctrl + C to terminate it."
+
+Write-Host ""
+Write-Host "============================="
+Write-Host "== 7. Open the URL in Browser"
+Write-Host "============================="
+
+function Open-Browser {
+    param(
+        [string]$Url
+    )
+    try {
+        Start-Process -FilePath $Url
+        Write-Host "Attempted to open '$Url' in default browser."
+    }
+    catch {
+        Write-Host "Failed to open the browser automatically. Please open '$Url' manually."
+    }
 }
-else {
-    Write-Host "`nCould not find $ServerScript. Make sure you're in the correct repo directory."
+
+Open-Browser -Url $link
+
+###############################################################################
+# 7. Run start_server.py in the Same PowerShell Window
+###############################################################################
+
+Write-Host ""
+Write-Host "============================="
+Write-Host "== 8. Run start_server.py"
+Write-Host "============================="
+
+Write-Host "Starting server in the current PowerShell window. Logs will appear below."
+Write-Host "Press Ctrl + C to terminate the server at any time."
+
+try {
+    # This call blocks until the server script finishes or Ctrl + C is pressed
+    uv run python $ServerScript
+}
+catch {
+    Write-Host "The server has stopped or was interrupted."
 }
 
-pause
+Write-Host ""
+Write-Host "Server script has exited. Goodbye!"
