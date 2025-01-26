@@ -191,6 +191,36 @@ EOF
     echo
     echo -e "${BOLD}${RED}⚠️  Press Ctrl + C to terminate the server.${NC}"
 
+    # Attempt to open the URL in the default browser
+    echo
+    echo "============================="
+    echo "== 7. Open the URL in Browser"
+    echo "============================="
+    
+    open_url() {
+        URL="$1"
+        if command -v xdg-open &> /dev/null; then
+            echo "🔍 Attempting to open the URL using 'xdg-open'..."
+            xdg-open "$URL" &
+        elif command -v gnome-open &> /dev/null; then
+            echo "🔍 'xdg-open' not found. Attempting to open the URL using 'gnome-open'..."
+            gnome-open "$URL" &
+        elif command -v kde-open &> /dev/null; then
+            echo "🔍 'xdg-open' and 'gnome-open' not found. Attempting to open the URL using 'kde-open'..."
+            kde-open "$URL" &
+        elif command -v open &> /dev/null; then
+            echo "🔍 'xdg-open' and 'gnome-open' not found. Attempting to open the URL using 'open' (macOS)..."
+            open "$URL" &
+        elif command -v start &> /dev/null; then
+            echo "🔍 'xdg-open' and 'gnome-open' not found. Attempting to open the URL using 'start' (Windows)..."
+            start "$URL" &
+        else
+            echo -e "${YELLOW}⚠️  Could not detect a method to open the URL automatically. Please open ${GREEN}${LINK}${YELLOW} manually in your browser.${NC}"
+        fi
+    }
+
+    open_url "$LINK"
+
     # Keep script running and wait for the server process
     wait "$SERVER_PID"
 else
