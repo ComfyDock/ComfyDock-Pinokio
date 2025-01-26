@@ -3,13 +3,13 @@ set -e
 
 # ------------------------------------------------------------------------------
 # This script does the following:
-#  1. Checks if any Python 3+ version is installed; if not, installs the default Python 3.
-#  2. Checks if Git is installed; if not, installs it.
-#  3. Pulls the latest changes from the current repo via git pull.
-#  4. Installs 'uv' for package management.
-#  5. Creates/activates a Python 3 virtualenv (idempotent).
-#  6. Installs requirements via requirements.txt
-#  7. Runs start_server.py with proper signal handling for graceful termination.
+#  1. Checks that 'apt' is available; if not, throws an error (unsupported distro).
+#  2. Checks if Git is installed; if not, installs it using 'apt'.
+#  3. Pulls the latest changes from the current repo via 'git pull'.
+#  4. Installs 'uv' (which handles Python downloads/venvs) using the official script.
+#  5. Creates/activates a virtual environment using 'uv'.
+#  6. Installs requirements from requirements.txt using 'uv' if present.
+#  7. Runs start_server.py with proper signal handling for Ctrl + C.
 # ------------------------------------------------------------------------------
 
 # Get the script's directory and move one level up to the project directory.
@@ -18,67 +18,36 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 cd "$PROJECT_DIR"
 
 # -----------------------------
-# 0. Define some variables
+# 0. Check if 'apt' is available
 # -----------------------------
-VENV_NAME=".venv"
-REQ_FILE="requirements.txt"
-SERVER_SCRIPT="start_server.py"
-
-# Function to print section headers
-print_section() {
-    echo
-    echo "============================="
-    echo "==  $1"
-    echo "============================="
-}
-
-# -----------------------------
-# 1. Check if any Python 3+ is installed
-# -----------------------------
-print_section "1. Check if Python 3+ is installed"
-PYTHON_CMD=""
-PYTHON_VERSION=""
-
-if command -v python3 &> /dev/null; then
-    PYTHON_CMD=$(command -v python3)
-    PYTHON_VERSION=$($PYTHON_CMD --version | awk '{print $2}')
-    echo -e "✅ Found Python version ${GREEN}$PYTHON_VERSION${NC} at ${GREEN}$PYTHON_CMD${NC}."
-else
-    echo "🚫 Python 3 not found. Installing the default Python 3..."
-    sudo apt-get update
-
-    # Install the default Python 3 and necessary packages
-    sudo apt-get install -y python3 python3-venv python3-dev python3-distutils curl
-
-    # Verify installation
-    if command -v python3 &> /dev/null; then
-        PYTHON_CMD=$(command -v python3)
-        PYTHON_VERSION=$($PYTHON_CMD --version | awk '{print $2}')
-        echo -e "✅ Python 3 installed successfully. Version: ${GREEN}$PYTHON_VERSION${NC}."
-    else
-        echo "❌ Failed to install Python 3. Please check the errors above."
-        exit 1
-    fi
+if ! command -v apt &> /dev/null; then
+    echo "❌ 'apt' not found. This script only supports Debian/Ubuntu-based distros."
+    exit 1
 fi
 
 # -----------------------------
-# 2. Check if Git is installed
+# 1. Check if Git is installed
 # -----------------------------
-print_section "2. Check if Git is installed"
-if ! command -v git &> /dev/null
-then
-    echo "🚫 Git not found. Installing..."
-    sudo apt-get update
-    sudo apt-get install -y git
+echo
+echo "============================="
+echo "== 1. Check if Git is installed"
+echo "============================="
+if ! command -v git &> /dev/null; then
+    echo "🚫 Git not found. Installing via apt..."
+    sudo apt update
+    sudo apt install -y git
     echo "✅ Git installed successfully."
 else
     echo "✅ Git is already installed."
 fi
 
 # -----------------------------
-# 3. Update local repo (git pull)
+# 2. Update local repo (git pull)
 # -----------------------------
-print_section "3. Update local repo (git pull)"
+echo
+echo "============================="
+echo "== 2. Update local repo (git pull)"
+echo "============================="
 if git rev-parse --is-inside-work-tree &> /dev/null; then
     git pull
     echo "✅ Repository updated successfully."
@@ -87,49 +56,50 @@ else
 fi
 
 # -----------------------------
-# 4. Install uv (Python package manager)
+# 3. Install uv (Package manager)
 # -----------------------------
-print_section "4. Install uv (Python package manager)"
-# Ensure pip is installed for the detected Python version
-if ! $PYTHON_CMD -m pip --version &> /dev/null; then
-    echo "🚫 pip not found for Python. Installing pip..."
-    curl https://bootstrap.pypa.io/get-pip.py -o get-pip.py
-    $PYTHON_CMD get-pip.py --user
-    rm get-pip.py
-    echo "✅ pip installed successfully."
+echo
+echo "============================="
+echo "== 3. Install uv"
+echo "============================="
+if ! command -v uv &> /dev/null; then
+    echo "🚀 Installing uv using the official install script..."
+    /bin/bash -c "$(curl -sSfL https://astral.sh/uv/install.sh)"
+    echo "✅ uv installed successfully."
+else
+    echo "✅ uv is already installed."
 fi
 
-# Upgrade pip
-$PYTHON_CMD -m pip install --upgrade pip
-
-# Install uv
-$PYTHON_CMD -m pip install uv
-echo "✅ 'uv' installed successfully."
-
 # -----------------------------
-# 5. Create (or reuse) a Python 3 virtual environment
+# 4. Create (or reuse) a uv-based virtual environment
 # -----------------------------
-print_section "5. Create (or reuse) a Python 3 virtual environment"
+echo
+echo "============================="
+echo "== 4. Create (or reuse) uv-based venv"
+echo "============================="
+
+VENV_NAME=".venv"
+
 if [ ! -d "$VENV_NAME" ]; then
     echo "🚀 Creating the virtual environment with uv..."
-    $PYTHON_CMD -m uv venv "$VENV_NAME" --python "$PYTHON_CMD"
+    # No need to specify a Python version; uv will handle downloads automatically
+    uv venv "$VENV_NAME"
     echo "✅ Virtual environment created."
 else
     echo "✅ Virtual environment '$VENV_NAME' already exists; reusing it..."
 fi
 
-echo "🔄 Activating the virtual environment..."
-# Activate the virtual environment
-# shellcheck disable=SC1091
-source "$VENV_NAME/bin/activate"
-
-echo "✅ Using Python version:"
-python --version
+# We'll rely on 'uv' commands (like "uv pip", "uv python") within the venv.
 
 # -----------------------------
-# 6. Install requirements
+# 5. Install requirements (if present)
 # -----------------------------
-print_section "6. Install requirements"
+REQ_FILE="requirements.txt"
+echo
+echo "============================="
+echo "== 5. Install requirements"
+echo "============================="
+
 if [ -f "$REQ_FILE" ]; then
     echo "📦 Installing dependencies from $REQ_FILE..."
     uv pip install -r "$REQ_FILE"
@@ -139,11 +109,16 @@ else
 fi
 
 # -----------------------------
-# 7. Run start_server.py with Signal Handling
+# 6. Run start_server.py with Signal Handling
 # -----------------------------
-print_section "7. Run $SERVER_SCRIPT"
+echo
+echo "============================="
+echo "== 6. Run start_server.py"
+echo "============================="
 
-# Function to handle cleanup on exit
+SERVER_SCRIPT="start_server.py"
+
+# Cleanup function to handle Ctrl + C
 cleanup() {
     echo
     echo "🛑 Interrupt received. Shutting down the server..."
@@ -157,11 +132,9 @@ cleanup() {
 
 if [ -f "$SERVER_SCRIPT" ]; then
     echo "🚀 Starting server..."
-
-    # Trap SIGINT and SIGTERM to gracefully shut down the server
     trap cleanup SIGINT SIGTERM
 
-    # Run the server in the background
+    # Start the server in the background using uv to run Python
     uv run python "$SERVER_SCRIPT" &
     SERVER_PID=$!
     echo "✅ Server started with PID: $SERVER_PID."
@@ -182,21 +155,20 @@ if [ -f "$SERVER_SCRIPT" ]; then
     by Akatz
 EOF
 
-    # Bordered link with enhanced visibility
+    # Big link banner
     LINK="http://localhost:8000"
-    BORDER_LEN=$(( ${#LINK} + 8 ))  # Increased padding for emphasis
+    BORDER_LEN=$(( ${#LINK} + 8 ))
     BORDER=$(printf '%*s' "${BORDER_LEN}" | tr ' ' '*')
 
-    # ANSI escape codes for colors and formatting
+    # ANSI codes for formatting
     BOLD='\033[1m'
     UNDERLINE='\033[4m'
     GREEN='\033[1;32m'    # Bold Green
     YELLOW='\033[1;33m'   # Bold Yellow
-    RED='\033[1;31m'      # Bold Red
-    BLUE='\033[1;34m'     # Bold Blue
-    CYAN='\033[1;36m'     # Bold Cyan
-    MAGENTA='\033[1;35m'  # Bold Magenta
-    NC='\033[0m'           # No Color
+    RED='\033[1;31m'
+    CYAN='\033[1;36m'
+    MAGENTA='\033[1;35m'
+    NC='\033[0m'
 
     echo
     echo -e "${BOLD}${CYAN}🔥🔥🔥 COMFYUI Environment Manager is running! 🔥🔥🔥${NC}"
@@ -208,7 +180,7 @@ EOF
     echo
     echo -e "${BOLD}${RED}⚠️  Press Ctrl + C to terminate the server.${NC}"
 
-    # Wait for the server process to finish
+    # Keep script running and wait for the server process
     wait "$SERVER_PID"
 else
     echo "❌ Could not find $SERVER_SCRIPT. Make sure you're in the correct repo directory."
