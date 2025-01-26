@@ -3,51 +3,65 @@ set -e
 
 # ------------------------------------------------------------------------------
 # This script does the following:
-#  1. Checks that 'apt' is available; if not, throws an error (unsupported distro).
-#  2. Checks if Git is installed; if not, installs it using 'apt'.
-#  3. Pulls the latest changes from the current repo via 'git pull'.
-#  4. Installs 'uv' (which handles Python downloads/venvs) using the official script.
-#  5. Creates/activates a virtual environment using 'uv'.
-#  6. Installs requirements from requirements.txt using 'uv' if present.
-#  7. Runs start_server.py with proper signal handling for Ctrl + C.
+#  1. Checks if Git is installed. If not:
+#     - Checks if 'apt' is available; if not found, shows instructions and exits.
+#     - Installs Git using 'apt'.
+#  2. Pulls the latest changes from the current repo via 'git pull'.
+#  3. Installs 'uv' (which handles Python downloads/venvs) using the official script.
+#  4. Creates/activates a virtual environment using 'uv'.
+#  5. Installs requirements from requirements.txt using 'uv' if present.
+#  6. Runs start_server.py with proper signal handling for Ctrl + C.
 # ------------------------------------------------------------------------------
 
-# Get the script's directory and move one level up to the project directory.
+###############################################################################
+# 0. Define some variables
+###############################################################################
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 cd "$PROJECT_DIR"
 
-# -----------------------------
-# 0. Check if 'apt' is available
-# -----------------------------
-if ! command -v apt &> /dev/null; then
-    echo "❌ 'apt' not found. This script only supports Debian/Ubuntu-based distros."
-    exit 1
-fi
+VENV_NAME=".venv"
+REQ_FILE="requirements.txt"
+SERVER_SCRIPT="start_server.py"
 
-# -----------------------------
+###############################################################################
 # 1. Check if Git is installed
-# -----------------------------
+###############################################################################
+
 echo
 echo "============================="
 echo "== 1. Check if Git is installed"
 echo "============================="
+
 if ! command -v git &> /dev/null; then
-    echo "🚫 Git not found. Installing via apt..."
-    sudo apt update
-    sudo apt install -y git
-    echo "✅ Git installed successfully."
+    echo "🚫 Git not found on your system."
+
+    # Try to see if apt is available
+    if command -v apt &> /dev/null; then
+        echo "✅ Detected 'apt'. Installing Git via apt..."
+        sudo apt update
+        sudo apt install -y git
+        echo "✅ Git installed successfully via apt."
+    else
+        echo "❌ 'apt' not found. This script only knows how to auto-install Git on Debian/Ubuntu-based distros."
+        echo "   Please install Git manually using your local package manager (e.g. pacman on Arch)."
+        echo "   After installing Git, re-run this script."
+        exit 1
+    fi
 else
     echo "✅ Git is already installed."
 fi
 
-# -----------------------------
+###############################################################################
 # 2. Update local repo (git pull)
-# -----------------------------
+###############################################################################
+
 echo
 echo "============================="
 echo "== 2. Update local repo (git pull)"
 echo "============================="
+
 if git rev-parse --is-inside-work-tree &> /dev/null; then
     git pull
     echo "✅ Repository updated successfully."
@@ -55,13 +69,15 @@ else
     echo "⚠️  Current directory is not a Git repository. Skipping git pull."
 fi
 
-# -----------------------------
+###############################################################################
 # 3. Install uv (Package manager)
-# -----------------------------
+###############################################################################
+
 echo
 echo "============================="
 echo "== 3. Install uv"
 echo "============================="
+
 if ! command -v uv &> /dev/null; then
     echo "🚀 Installing uv using the official install script..."
     /bin/bash -c "$(curl -sSfL https://astral.sh/uv/install.sh)"
@@ -70,31 +86,27 @@ else
     echo "✅ uv is already installed."
 fi
 
-# -----------------------------
+###############################################################################
 # 4. Create (or reuse) a uv-based virtual environment
-# -----------------------------
+###############################################################################
+
 echo
 echo "============================="
 echo "== 4. Create (or reuse) uv-based venv"
 echo "============================="
 
-VENV_NAME=".venv"
-
 if [ ! -d "$VENV_NAME" ]; then
     echo "🚀 Creating the virtual environment with uv..."
-    # No need to specify a Python version; uv will handle downloads automatically
     uv venv "$VENV_NAME"
     echo "✅ Virtual environment created."
 else
     echo "✅ Virtual environment '$VENV_NAME' already exists; reusing it..."
 fi
 
-# We'll rely on 'uv' commands (like "uv pip", "uv python") within the venv.
-
-# -----------------------------
+###############################################################################
 # 5. Install requirements (if present)
-# -----------------------------
-REQ_FILE="requirements.txt"
+###############################################################################
+
 echo
 echo "============================="
 echo "== 5. Install requirements"
@@ -108,15 +120,14 @@ else
     echo "⚠️  No $REQ_FILE file found; skipping 'pip install -r $REQ_FILE'."
 fi
 
-# -----------------------------
+###############################################################################
 # 6. Run start_server.py with Signal Handling
-# -----------------------------
+###############################################################################
+
 echo
 echo "============================="
 echo "== 6. Run start_server.py"
 echo "============================="
-
-SERVER_SCRIPT="start_server.py"
 
 # Cleanup function to handle Ctrl + C
 cleanup() {
