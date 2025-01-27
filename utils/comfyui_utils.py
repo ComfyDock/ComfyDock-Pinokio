@@ -28,7 +28,7 @@ def try_install_comfyui(path: str, branch: str = "master"):
         return str(comfyui_dir)
     except subprocess.CalledProcessError as e:
         print(f"Error during git clone: {e.stderr}")
-        raise HTTPException(status_code=400, detail=f"Failed to clone ComfyUI repository to {comfyui_dir}.")
+        raise HTTPException(status_code=400, detail=f"Failed to clone ComfyUI repository to {comfyui_dir}. Error: {e.stderr}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error during ComfyUI installation: {str(e)}")
     
