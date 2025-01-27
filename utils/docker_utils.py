@@ -404,7 +404,8 @@ def _create_mounts_from_new_config(mount_config: dict, comfyui_path: Path):
           "container_path": "/app/ComfyUI/models",
           "host_path": "C:\\path\\to\\my\\shared\\models\\drive\\directory",
           "type": "mount",
-          "read_only": false
+          "read_only": false,
+          "override": false
         },
         ...
       ]

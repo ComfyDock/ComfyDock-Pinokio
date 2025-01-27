@@ -1,5 +1,6 @@
 cache/
 env/
+.venv/
 ENVIRONMENT
 environments.json
 user.settings.json
