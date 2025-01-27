@@ -3,7 +3,9 @@
 ⭐ **If you find this tool helpful, please consider giving this repo a star!** ⭐
 
 
-[Notion Guide](https://cyber-damselfly-b6c.notion.site/ComfyUI-Environment-Manager-14ffd5b1ca3b804abafbdb4bd6b8068e)
+For a more in-depth guide see the [Notion Guide](https://cyber-damselfly-b6c.notion.site/ComfyUI-Environment-Manager-14ffd5b1ca3b804abafbdb4bd6b8068e)
+
+Get help instantly using my [Custom GPT!](https://chatgpt.com/g/g-676795064ce48191b20d03bf6d3b3827-comfyui-environment-manager-helper)
 
 <img src="assets/icon.png" alt="Logo" width="400"/>
 
@@ -33,8 +35,8 @@ https://github.com/user-attachments/assets/7f1e868e-fb0d-4b1b-aaec-a1ef1a9949f3
 - **🔧 Custom Node Support:** Easily install and manage custom nodes.
 - **⚙️ Advanced Options:** GPU acceleration, runtime settings, and more.
 
----
-
+<br>
+  
 ## 🛠️ **Installation**
 
 https://github.com/user-attachments/assets/3b95c4a5-e88b-458e-9933-68856f3b09da
@@ -68,6 +70,32 @@ https://github.com/user-attachments/assets/3b95c4a5-e88b-458e-9933-68856f3b09da
    - Ensure Docker is running.
 
 ---
+
+### Running Without Pinokio on Windows:
+
+1. Navigate to a desired folder to clone this repo:
+   - Open File Explorer.
+   - Browse to the folder where you want to clone the repo.
+  
+2. Open Command Prompt:
+   - Right-click inside the folder.
+   - Select **Open in Terminal** or **Open Command Window Here** (depending on your system).
+     
+3. Clone the Repo:
+   - Run the following command in the terminal:
+```
+git clone https://github.com/akatz-ai/ComfyUI-Environment-Manager.git
+```
+
+4. Navigate to the Script:
+   - Open the newly created **ComfyUI-Environment-Manager** folder.
+   - Go to the **scripts/** directory.
+     
+5. Run the Script:
+   - Right-click on start_windows.ps1.
+   - Select **Run with PowerShell**.
+
+<br>
 
 ## 📖 **Usage**
 
@@ -105,9 +133,7 @@ https://github.com/user-attachments/assets/ac2880f6-55b8-4b03-97e8-8ba0f86de87e
 - **Logs:** View the environment's real-time output.
 - **Delete:** Remove an environment (mounted host directories are preserved).
 
-
-
----
+<br>
 
 ## 🛡️ **Troubleshooting**
 
@@ -119,7 +145,13 @@ https://github.com/user-attachments/assets/ac2880f6-55b8-4b03-97e8-8ba0f86de87e
   \\wsl.localhost\<distro>\<path-to-directory>
   ```
 
----
+### Dependencies:
+
+https://github.com/akatz-ai/ComfyUI-Environment-Docker
+
+https://github.com/akatz-ai/ComfyUI-Environment-Frontend
+
+<br>
 
 ## 👨‍💻 **About the Author**
 
