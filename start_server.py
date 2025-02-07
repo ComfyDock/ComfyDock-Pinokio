@@ -1,73 +1,104 @@
 import argparse
 import time
-import docker
 import subprocess
 import signal
 import sys
 
-# Docker client
-client = docker.from_env()
+# Import functions from docker_utils instead of creating our own client.
+from utils.docker_utils import (
+    try_pull_image,
+    get_container,
+    run_container,
+    stop_container as docker_stop_container,
+)
 
 # Container and server details
 CONTAINER_NAME = "comfy-env-frontend"
 IMAGE_NAME = "akatzai/comfy-env-frontend"
 FRONTEND_IMAGE_VERSION = "0.5.1"
 
+
 def parse_arguments():
     """Parse command-line arguments."""
-    parser = argparse.ArgumentParser(description="Run the server with optional ComfyUI path.")
-    parser.add_argument("--allow_running_multiple_containers", type=str, help="Allow running multiple containers", default="False")
+    parser = argparse.ArgumentParser(
+        description="Run the server with optional ComfyUI path."
+    )
+    parser.add_argument(
+        "--allow_running_multiple_containers",
+        type=str,
+        help="Allow running multiple containers",
+        default="False",
+    )
     # Assert that the argument is "True" or "False"
-    assert parser.parse_args().allow_running_multiple_containers in ["True", "False"], "Argument allow_running_multiple_containers must be 'True' or 'False'"
-    return parser.parse_args()
+    args = parser.parse_args()
+    assert args.allow_running_multiple_containers in [
+        "True",
+        "False",
+    ], "Argument allow_running_multiple_containers must be 'True' or 'False'"
+    return args
+
 
 def start_container():
     """Start the Docker container if it's not already running."""
     image_name_with_tag = f"{IMAGE_NAME}:{FRONTEND_IMAGE_VERSION}"
-    
+
     try:
-        # Try to pull the image from Docker Hub
-        print(f"Pulling image {image_name_with_tag} from Docker Hub.")
-        client.images.pull(image_name_with_tag)
-        
-        # Check if the container exists
+        # Use docker utils to check for and pull the image if needed.
+        try_pull_image(image_name_with_tag)
+
+        # Check if the container exists.
         try:
-            container = client.containers.get(CONTAINER_NAME)
+            container = get_container(CONTAINER_NAME)
             if container.status == "running":
                 print(f"Stopping running container: {CONTAINER_NAME}")
-                container.stop(timeout=0)
+                docker_stop_container(container, timeout=0)
             print(f"Starting new container: {CONTAINER_NAME}")
             time.sleep(1)
-            client.containers.run(image_name_with_tag, name=CONTAINER_NAME, ports={"8000": 8000}, detach=True, remove=True)
-        except docker.errors.NotFound:
+            run_container(
+                image=image_name_with_tag,
+                name=CONTAINER_NAME,
+                ports={"8000": 8000},
+                detach=True,
+                remove=True,
+            )
+        except Exception as e:
+            # If the container is not found, then run a new container.
             print(f"Container {CONTAINER_NAME} not found. Running a new container.")
-            # Run the container after ensuring the image is available
-            client.containers.run(image_name_with_tag, name=CONTAINER_NAME, ports={"8000": 8000}, detach=True, remove=True)
-    except docker.errors.APIError as e:
-        print(f"Error pulling image {image_name_with_tag}: {e}")
-        raise e
+            run_container(
+                image=image_name_with_tag,
+                name=CONTAINER_NAME,
+                ports={"8000": 8000},
+                detach=True,
+                remove=True,
+            )
     except Exception as e:
         print(f"Error starting container: {e}")
-        raise e
+        raise
+
 
 def stop_container():
     """Stop the Docker container if it's running."""
     try:
-        container = client.containers.get(CONTAINER_NAME)
+        container = get_container(CONTAINER_NAME)
         if container.status == "running":
             print(f"Stopping container: {CONTAINER_NAME}")
-            container.stop()
-    except docker.errors.NotFound:
-        print(f"Container {CONTAINER_NAME} not found.")
+            docker_stop_container(container)
     except Exception as e:
         print(f"Error stopping container: {e}")
+
 
 def start_server(allow_running_multiple_containers):
     """Start the Python server."""
     python_interpreter = sys.executable
-    server_command = [python_interpreter, "app.py", "--allow_running_multiple_containers", str(allow_running_multiple_containers)]
+    server_command = [
+        python_interpreter,
+        "app.py",
+        "--allow_running_multiple_containers",
+        str(allow_running_multiple_containers),
+    ]
     print("Starting Python server...")
     return subprocess.Popen(server_command)
+
 
 def shutdown(signal_received, frame):
     """Handle shutdown process."""
@@ -75,18 +106,19 @@ def shutdown(signal_received, frame):
     stop_container()
     sys.exit(0)
 
+
 if __name__ == "__main__":
-    # Parse command-line arguments
+    # Parse command-line arguments.
     args = parse_arguments()
 
-    # Register the shutdown handler
+    # Register the shutdown handler.
     signal.signal(signal.SIGINT, shutdown)
 
-    # Start the container and server
+    # Start the container and server.
     start_container()
     server_process = start_server(args.allow_running_multiple_containers)
 
-    # Wait for the server process to complete
+    # Wait for the server process to complete.
     try:
         server_process.wait()
     except KeyboardInterrupt:

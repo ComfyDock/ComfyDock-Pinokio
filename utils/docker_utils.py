@@ -106,6 +106,21 @@ def try_pull_image(image):
     except APIError as e:
         print(f"Error pulling image {image}: {e}")
         raise e
+    
+def run_container(image, name, ports, detach=True, remove=True):
+    """Run a container from the specified image with the given parameters."""
+    try:
+        container = client.containers.run(
+            image,
+            name=name,
+            ports=ports,
+            detach=detach,
+            remove=remove
+        )
+        return container
+    except APIError as e:
+        print(f"Error running container {name} with image {image}: {e}")
+        raise e
 
 def ensure_directory_exists(container, path):
     """Ensure that a directory exists in the container."""

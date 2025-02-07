@@ -4,8 +4,7 @@
     {
       "method": "shell.run",
       "params": {
-        "venv": "env",
-        "message": "python start_server.py --allow_running_multiple_containers {{env.ALLOW_RUNNING_MULTIPLE_CONTAINERS}}"
+        "message": "uv run start_server.py --allow_running_multiple_containers {{env.ALLOW_RUNNING_MULTIPLE_CONTAINERS}}"
       }
     }
   ]
