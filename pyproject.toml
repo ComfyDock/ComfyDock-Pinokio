@@ -5,10 +5,5 @@ description = "A manager for ComfyUI environments using Docker"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "docker>=7.1.0",
-    "fastapi[all]>=0.115.8",
-    "filelock>=3.17.0",
-    "pydantic>=2.10.6",
-    "python-dateutil>=2.9.0.post0",
-    "uvicorn>=0.34.0",
+    "comfydock-server>=0.1.1",
 ]

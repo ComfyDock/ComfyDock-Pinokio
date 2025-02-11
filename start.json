@@ -4,7 +4,7 @@
     {
       "method": "shell.run",
       "params": {
-        "message": "uv run start_server.py --allow_running_multiple_containers {{env.ALLOW_RUNNING_MULTIPLE_CONTAINERS}}"
+        "message": "uv run start_server.py --allow-multiple-containers {{env.ALLOW_MULTIPLE_CONTAINERS}} --db-file-path {{env.DB_FILE_PATH}} --user-settings-file-path {{env.USER_SETTINGS_FILE_PATH}} --frontend-host-port {{env.FRONTEND_HOST_PORT}}"
       }
     }
   ]

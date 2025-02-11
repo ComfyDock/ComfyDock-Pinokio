@@ -1,125 +1,150 @@
+import logging
 import argparse
-import time
-import subprocess
+import os
 import signal
 import sys
+import json
+from pathlib import Path
 
-# Import functions from docker_utils instead of creating our own client.
-from utils.docker_utils import (
-    try_pull_image,
-    get_container,
-    run_container,
-    stop_container as docker_stop_container,
-)
-
-# Container and server details
-CONTAINER_NAME = "comfy-env-frontend"
-IMAGE_NAME = "akatzai/comfy-env-frontend"
-FRONTEND_IMAGE_VERSION = "0.5.1"
+from comfydock_server.config import ServerConfig
+from comfydock_server.server import ComfyDockServer
 
 
-def parse_arguments():
-    """Parse command-line arguments."""
+def parse_str_with_default(default):
+    def inner(value):
+        if value.startswith("{{env.") and value.endswith("}}"):
+            return default
+        return value
+
+    return inner
+
+
+def parse_int_with_default(default):
+    def inner(value):
+
+        try:
+            return int(value)
+        except ValueError:
+            # If the value looks like a templated env variable, return the default.
+            if value.startswith("{{env.") and value.endswith("}}"):
+                return default
+            # Otherwise, let argparse complain.
+            raise argparse.ArgumentTypeError(f"Invalid int value: {value}")
+
+    return inner
+
+
+def parse_bool_with_default(default):
+    def inner(value):
+        # Allow actual bools (if passed from code) or strings.
+        if isinstance(value, bool):
+            return value
+        val = value.lower()
+        if val in ["true", "1", "yes"]:
+            return True
+        elif val in ["false", "0", "no"]:
+            return False
+        elif value.startswith("{{env.") and value.endswith("}}"):
+            return default
+        else:
+            raise argparse.ArgumentTypeError(f"Invalid bool value: {value}")
+
+    return inner
+
+
+def parse_args(config_data):
     parser = argparse.ArgumentParser(
-        description="Run the server with optional ComfyUI path."
+        description="Start ComfyDock Server with custom configuration."
     )
     parser.add_argument(
-        "--allow_running_multiple_containers",
-        type=str,
-        help="Allow running multiple containers",
-        default="False",
+        "--db-file-path",
+        type=parse_str_with_default(config_data["defaults"]["db_file_path"]),
+        help="Path to environments database file",
     )
-    # Assert that the argument is "True" or "False"
-    args = parser.parse_args()
-    assert args.allow_running_multiple_containers in [
-        "True",
-        "False",
-    ], "Argument allow_running_multiple_containers must be 'True' or 'False'"
-    return args
+
+    parser.add_argument(
+        "--user-settings-file-path",
+        type=parse_str_with_default(config_data["defaults"]["user_settings_file_path"]),
+        help="Path to user settings file",
+    )
+    parser.add_argument(
+        "--frontend-host-port",
+        type=parse_int_with_default(config_data["frontend"]["default_host_port"]),
+        help="Frontend host port",
+    )
+    parser.add_argument(
+        "--allow-multiple-containers",
+        type=parse_bool_with_default(config_data["defaults"]["allow_multiple_containers"]),
+        help="Allow running multiple containers",
+    )
+    return parser.parse_args()
 
 
-def start_container():
-    """Start the Docker container if it's not already running."""
-    image_name_with_tag = f"{IMAGE_NAME}:{FRONTEND_IMAGE_VERSION}"
 
-    try:
-        # Use docker utils to check for and pull the image if needed.
-        try_pull_image(image_name_with_tag)
-
-        # Check if the container exists.
-        try:
-            container = get_container(CONTAINER_NAME)
-            if container.status == "running":
-                print(f"Stopping running container: {CONTAINER_NAME}")
-                docker_stop_container(container, timeout=0)
-            print(f"Starting new container: {CONTAINER_NAME}")
-            time.sleep(1)
-            run_container(
-                image=image_name_with_tag,
-                name=CONTAINER_NAME,
-                ports={"8000": 8000},
-                detach=True,
-                remove=True,
-            )
-        except Exception as e:
-            # If the container is not found, then run a new container.
-            print(f"Container {CONTAINER_NAME} not found. Running a new container.")
-            run_container(
-                image=image_name_with_tag,
-                name=CONTAINER_NAME,
-                ports={"8000": 8000},
-                detach=True,
-                remove=True,
-            )
-    except Exception as e:
-        print(f"Error starting container: {e}")
-        raise
-
-
-def stop_container():
-    """Stop the Docker container if it's running."""
-    try:
-        container = get_container(CONTAINER_NAME)
-        if container.status == "running":
-            print(f"Stopping container: {CONTAINER_NAME}")
-            docker_stop_container(container)
-    except Exception as e:
-        print(f"Error stopping container: {e}")
-
-
-def start_server(allow_running_multiple_containers):
-    """Start the Python server."""
-    python_interpreter = sys.executable
-    server_command = [
-        python_interpreter,
-        "app.py",
-        "--allow_running_multiple_containers",
-        str(allow_running_multiple_containers),
-    ]
-    print("Starting Python server...")
-    return subprocess.Popen(server_command)
-
-
-def shutdown(signal_received, frame):
-    """Handle shutdown process."""
-    print(f"Received signal: {signal_received}. Shutting down...")
-    stop_container()
+def signal_handler(signum, frame):
+    print(f"\nReceived signal {signum}. Shutting down gracefully...")
+    if "server" in globals():
+        print("Stopping server...")
+        server.stop()
     sys.exit(0)
 
 
-if __name__ == "__main__":
-    # Parse command-line arguments.
-    args = parse_arguments()
-
-    # Register the shutdown handler.
-    signal.signal(signal.SIGINT, shutdown)
-
-    # Start the container and server.
-    start_container()
-    server_process = start_server(args.allow_running_multiple_containers)
-
-    # Wait for the server process to complete.
+def load_config():
+    config_path = Path(__file__).parent / "config.json"
     try:
-        server_process.wait()
-    except KeyboardInterrupt:
-        shutdown(signal.SIGINT, None)
+        with open(config_path) as f:
+            return json.load(f)
+    except FileNotFoundError:
+        print(f"Configuration file not found at {config_path}")
+        return {}
+
+
+def run():
+    config_data = load_config()
+    args = parse_args(config_data)
+
+    # Create configuration with default values
+    config = ServerConfig(
+        comfyui_path=os.getcwd(),
+        db_file_path=args.db_file_path or config_data["defaults"]["db_file_path"],
+        user_settings_file_path=args.user_settings_file_path
+        or config_data["defaults"]["user_settings_file_path"],
+        frontend_image=config_data["frontend"]["image"],
+        frontend_version=config_data["frontend"]["version"],
+        frontend_container_port=config_data["frontend"]["container_port"],
+        frontend_host_port=args.frontend_host_port
+        or config_data["frontend"]["default_host_port"],
+        backend_port=config_data["backend"]["port"],
+        backend_host=config_data["backend"]["host"],
+        allow_multiple_containers=(
+            args.allow_multiple_containers
+            if args.allow_multiple_containers is not None
+            else config_data["defaults"]["allow_multiple_containers"]
+        ),
+    )
+
+    # Initialize server
+    server = ComfyDockServer(config)
+
+    # Register signal handlers
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
+    try:
+        print("Starting server...")
+        server.start()
+
+        # Keep server running
+        while True:
+
+            try:
+                input("")
+            except KeyboardInterrupt:
+                signal_handler(signal.SIGINT, None)
+    finally:
+        print("Stopping server...")
+        server.stop()
+
+
+if __name__ == "__main__":
+    run()

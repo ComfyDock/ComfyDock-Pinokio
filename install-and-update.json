@@ -11,6 +11,12 @@
       "params": {
         "message": "uv sync"
       }
+    },
+    {
+      "method": "shell.run",
+      "params": {
+        "message": "rm ./ENVIRONMENT"
+      }
     }
   ]
 }
