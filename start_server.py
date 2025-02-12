@@ -97,11 +97,16 @@ def load_config():
     except FileNotFoundError:
         print(f"Configuration file not found at {config_path}")
         return {}
-
+    
+    
+def setup_logging(logging_config):
+    logging.config.dictConfig(logging_config)
 
 def run():
     config_data = load_config()
     args = parse_args(config_data)
+    
+    setup_logging(config_data["logging"])
 
     # Create configuration with default values
     config = ServerConfig(

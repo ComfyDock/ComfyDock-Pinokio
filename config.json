@@ -1,18 +1,50 @@
 {
   "frontend": {
-      "image": "akatzai/comfydock-frontend",
-      "version": "0.1.0",
-      "container_port": 8000,
-      "default_host_port": 8000
+    "image": "akatzai/comfydock-frontend",
+    "version": "0.1.0",
+    "container_port": 8000,
+    "default_host_port": 8000
   },
   "backend": {
-      "port": 5172,
-      "host": "127.0.0.1"
+    "port": 5172,
+    "host": "127.0.0.1"
   },
   "defaults": {
-      "db_file_path": "./environments.json",
-      "user_settings_file_path": "./user.settings.json",
-      "allow_multiple_containers": false,
-      "log_level": "INFO"
+    "db_file_path": "./environments.json",
+    "user_settings_file_path": "./user.settings.json",
+    "allow_multiple_containers": false,
+    "log_level": "INFO"
+  },
+  "logging": {
+    "version": 1,
+    "disable_existing_loggers": false,
+    "formatters": {
+      "detailed": {
+        "format": "%(asctime)s %(name)s [%(levelname)s] %(message)s",
+        "datefmt": "%Y-%m-%d %H:%M:%S %z"
+      }
+    },
+    "handlers": {
+      "console": {
+        "class": "logging.StreamHandler",
+        "formatter": "detailed",
+        "level": "INFO"
+      },
+      "file": {
+        "class": "logging.handlers.RotatingFileHandler",
+        "formatter": "detailed",
+        "filename": "comfydock.log",
+        "mode": "a",
+        "maxBytes": 10485760,
+        "backupCount": 3,
+        "level": "INFO"
+      }
+    },
+    "loggers": {
+      "": {
+        "handlers": ["console", "file"],
+        "level": "INFO"
+      }
+    }
   }
 }

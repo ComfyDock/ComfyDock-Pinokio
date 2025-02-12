@@ -1,5 +1,5 @@
 module.exports = {
-  title: "Comfy Environment Manager",
+  title: "ComfyDock",
   description: "Manage your ComfyUI environments",
   icon: "assets/icon.png",
   version: "2.0",

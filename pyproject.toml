@@ -1,9 +1,9 @@
 [project]
-name = "comfyenvmanager"
-version = "0.1.0"
+name = "comfydock_pinokio"
+version = "1.0.0"
 description = "A manager for ComfyUI environments using Docker"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "comfydock-server>=0.1.1",
+    "comfydock-server>=0.1.2",
 ]
