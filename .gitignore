@@ -19,3 +19,4 @@ ComfyUI/
 
 *.bak
 *.log
+*.lock
