@@ -9,10 +9,14 @@ user.settings.json
 *.pyo
 *.pyz
 utils/__pycache__
+__pycache__
 
 *.lnk
 node_modules/
 
 ComfyUI/
 .DS_Store
+
+*.bak
+*.log
 *.lock

@@ -1,6 +1,0 @@
-fastapi[all]
-pydantic
-docker
-uvicorn
-filelock
-python-dateutil
