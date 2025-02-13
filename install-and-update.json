@@ -7,9 +7,9 @@
       }
     },
     {
-      "method": "shell.run",
+      "method": "script.run",
       "params": {
-        "message": "uv sync"
+        "uri": "install-deps.json"
       }
     }
   ]
