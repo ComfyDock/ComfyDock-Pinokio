@@ -3,9 +3,9 @@
 ⭐ **If you find this tool helpful, please consider giving this repo a star!** ⭐
 
 
-For a more in-depth guide see the [Website Guide](https://www.comfydock.com)
+For a more in-depth guide see the [Documentation](https://www.comfydock.com)
 
-Get help instantly using my [Custom GPT!](https://chatgpt.com/g/g-676795064ce48191b20d03bf6d3b3827-comfyui-environment-manager-helper)
+> Get help instantly using my [Custom GPT!](https://chatgpt.com/g/g-676795064ce48191b20d03bf6d3b3827-comfyui-environment-manager-helper)
 
 <img src="assets/icon.png" alt="Logo" width="400"/>
 
