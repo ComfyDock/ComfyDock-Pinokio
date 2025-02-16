@@ -61,7 +61,7 @@ https://github.com/user-attachments/assets/3b95c4a5-e88b-458e-9933-68856f3b09da
    - Download Pinokio from [here](https://program.pinokio.computer/#/?id=install).
    - Use **Discover > Download from URL** and paste:
      ```
-     https://github.com/akatz-ai/ComfyUI-Environment-Manager
+     https://github.com/ComfyDock/ComfyDock-Pinokio
      ```
    - Follow the installation process.
 
