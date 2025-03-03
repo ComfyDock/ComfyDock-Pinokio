@@ -115,7 +115,6 @@ def run():
         user_settings_file_path=args.user_settings_file_path
         or config_data["defaults"]["user_settings_file_path"],
         frontend_image=config_data["frontend"]["image"],
-        frontend_version=config_data["frontend"]["version"],
         frontend_container_port=config_data["frontend"]["container_port"],
         frontend_host_port=args.frontend_host_port
         or config_data["frontend"]["default_host_port"],

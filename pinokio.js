@@ -14,7 +14,7 @@ module.exports = {
   menu: [
     {
       text: "Help",
-      href: "https://cyber-damselfly-b6c.notion.site/ComfyUI-Environment-Manager-14ffd5b1ca3b804abafbdb4bd6b8068e",
+      href: "https://comfydock.com",
       icon: "fa-solid fa-circle-info"
     },
     {
