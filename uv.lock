@@ -182,7 +182,7 @@ wheels = [
 
 [[package]]
 name = "comfydock-core"
-version = "0.1.3"
+version = "0.1.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiodocker" },
@@ -190,9 +190,9 @@ dependencies = [
     { name = "filelock" },
     { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/dc/80/3f571ff09dd71d4e2594cf2f5386fc4eff2f892bf459b57008d25367a76b/comfydock_core-0.1.3.tar.gz", hash = "sha256:be1c4edbff9546c21d09449f9af8e9ece5e205e6420884bbadf96b85faebb493", size = 60107 }
+sdist = { url = "https://files.pythonhosted.org/packages/15/30/8397aa620693b75f4441fc592c826019abb5d038dae55551dc1b11daff69/comfydock_core-0.1.4.tar.gz", hash = "sha256:54bfdc4092d68693f8e9e265e016a3814de2ce0e13f95c703d6d7033059b61f0", size = 60269 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/63/b7/8b0937941260b3da9a117358491548bbb96d6711edfd8a0fc64533e482b7/comfydock_core-0.1.3-py3-none-any.whl", hash = "sha256:82b4be7ef5eaf5ecfa6ca23661649b01c76b76a0bafea7743ad7e89aa9dee0f7", size = 15734 },
+    { url = "https://files.pythonhosted.org/packages/23/d7/746fb15890da80bcc17518ef4a2fa9840dfaae5971be94d19335b535e0be/comfydock_core-0.1.4-py3-none-any.whl", hash = "sha256:f280f9c40c9621a8b57bf12c85c82b824338c5013e6b68f6abd92529b7cfec0c", size = 15949 },
 ]
 
 [[package]]
@@ -204,11 +204,11 @@ dependencies = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "comfydock-server", specifier = ">=0.1.5" }]
+requires-dist = [{ name = "comfydock-server", specifier = ">=0.1.6" }]
 
 [[package]]
 name = "comfydock-server"
-version = "0.1.5"
+version = "0.1.6"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "comfydock-core" },
@@ -219,9 +219,9 @@ dependencies = [
     { name = "requests" },
     { name = "uvicorn" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/2f/5b/9dd83f48426bbe494ba9b7d26f71b957d79cb65c470630eeeda451d52649/comfydock_server-0.1.5.tar.gz", hash = "sha256:e4c9806ae62a7259886307a5cd5620ecfd90e5bbb071dbe8d7c1699d5cd4d796", size = 71559 }
+sdist = { url = "https://files.pythonhosted.org/packages/6b/99/64d21272d3a2da75291abe86535203efd012bb2bce14f633daeff79b055d/comfydock_server-0.1.6.tar.gz", hash = "sha256:937f0b43b441be3bd6dcd49eca2fcad87f38fa3ac7e5ac2bdbc8c70ab8efc255", size = 71565 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/cc/2c/1d97ae8a66081d07ce80581598cb6642b931e964cc9a79c25142aff851d7/comfydock_server-0.1.5-py3-none-any.whl", hash = "sha256:69923255b84d9d33d8a8f0b595ccecee1fa717ef1c5206fa730ed418df3fd7f0", size = 11927 },
+    { url = "https://files.pythonhosted.org/packages/88/8d/76336c41316f44be207457f902926352f3b4d7b9e1fa6de28454559450c4/comfydock_server-0.1.6-py3-none-any.whl", hash = "sha256:06023458b40f8f0edfdae0dfbe35cea6679d0ff51e282adb1fbc57914c5f1578", size = 11927 },
 ]
 
 [[package]]
