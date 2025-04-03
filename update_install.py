@@ -186,4 +186,6 @@ def main():
 
 
 if __name__ == "__main__":
+    run_command(["git", "--version"])
+    run_command(["git", "config", "--list", "--show-origin"])
     main()
