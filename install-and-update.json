@@ -3,13 +3,7 @@
     {
       "method": "shell.run",
       "params": {
-        "message": "git pull"
-      }
-    },
-    {
-      "method": "script.run",
-      "params": {
-        "uri": "install-deps.json"
+        "message": "uv run update_install.py main"
       }
     }
   ]
