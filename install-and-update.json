@@ -3,7 +3,7 @@
     {
       "method": "shell.run",
       "params": {
-        "message": "./install.sh akatz-dev"
+        "message": "uv run update_install.py akatz-dev"
       }
     }
   ]
