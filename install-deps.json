@@ -3,7 +3,7 @@
     {
       "method": "shell.run",
       "params": {
-        "message": "uv sync"
+        "message": "uv sync --frozen"
       }
     }
   ]
