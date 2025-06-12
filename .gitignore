@@ -3,10 +3,7 @@ env/
 .venv/
 ENVIRONMENT
 environments.json
-environments.json.lock
 user.settings.json
-user.settings.json.lock
-*.json.lock
 *.pyc
 *.pyd
 *.pyo
@@ -22,3 +19,4 @@ ComfyUI/
 
 *.bak
 *.log
+*.lock

@@ -1,22 +1,7 @@
 {
-  "frontend": {
-    "image": "akatzai/comfydock-frontend:0.1.6",
-    "container_port": 8000,
-    "default_host_port": 8000
-  },
-  "backend": {
-    "port": 5172,
-    "host": "127.0.0.1"
-  },
-  "defaults": {
-    "db_file_path": "./environments.json",
-    "user_settings_file_path": "./user.settings.json",
-    "allow_multiple_containers": false,
-    "log_level": "INFO"
-  },
   "logging": {
     "version": 1,
-    "disable_existing_loggers": false,
+    "disable_existing_loggers": true,
     "formatters": {
       "detailed": {
         "format": "%(asctime)s %(name)s [%(levelname)s] %(message)s",
@@ -36,13 +21,26 @@
         "mode": "a",
         "maxBytes": 10485760,
         "backupCount": 3,
-        "level": "INFO"
+        "level": "DEBUG"
       }
     },
     "loggers": {
       "": {
-        "handlers": ["console", "file"],
+        "handlers": ["console"],
         "level": "INFO"
+      },
+      "comfydock_server": {
+        "handlers": ["file"],
+        "level": "DEBUG"
+      },
+      "comfydock_core": {
+        "handlers": ["file"],
+        "level": "DEBUG"
+      },
+      "uvicorn": {
+        "handlers": ["file"],
+        "level": "INFO",
+        "propagate": false
       }
     }
   }

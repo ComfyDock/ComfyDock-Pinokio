@@ -1,154 +1,128 @@
-import logging
+# pinokio_app/start_server.py  (patched)
+
+from __future__ import annotations
+
 import argparse
+import json
+import logging.config
 import os
+import re
 import signal
 import sys
-import json
 from pathlib import Path
 
-from comfydock_server.config import ServerConfig
+from comfydock_server.config import load_config, AppConfig
 from comfydock_server.server import ComfyDockServer
 
-
-def parse_str_with_default(default):
-    def inner(value):
-        if value.startswith("{{env.") and value.endswith("}}"):
-            return default
-        return value
-
-    return inner
+# ────────────────────────────────────────────────────────────────────────────
+# Helpers
+# ────────────────────────────────────────────────────────────────────────────
+_PLACEHOLDER_RE = re.compile(r"^\{\{env\.[^}]+}}$")
 
 
-def parse_int_with_default(default):
-    def inner(value):
-
-        try:
-            return int(value)
-        except ValueError:
-            # If the value looks like a templated env variable, return the default.
-            if value.startswith("{{env.") and value.endswith("}}"):
-                return default
-            # Otherwise, let argparse complain.
-            raise argparse.ArgumentTypeError(f"Invalid int value: {value}")
-
-    return inner
+def is_placeholder(v: str | None) -> bool:
+    return isinstance(v, str) and _PLACEHOLDER_RE.match(v) is not None
 
 
-def parse_bool_with_default(default):
-    def inner(value):
-        # Allow actual bools (if passed from code) or strings.
-        if isinstance(value, bool):
-            return value
-        val = value.lower()
-        if val in ["true", "1", "yes"]:
-            return True
-        elif val in ["false", "0", "no"]:
-            return False
-        elif value.startswith("{{env.") and value.endswith("}}"):
-            return default
-        else:
-            raise argparse.ArgumentTypeError(f"Invalid bool value: {value}")
-
-    return inner
+def to_int(v: str | None) -> int | None:
+    try:
+        return int(v) if v is not None else None
+    except ValueError:
+        return None  # keep old default if conversion fails
 
 
-def parse_args(config_data):
-    parser = argparse.ArgumentParser(
-        description="Start ComfyDock Server with custom configuration."
+def to_bool(v: str | None) -> bool | None:
+    if v is None:
+        return None
+    s = str(v).lower()
+    if s in ("true", "1", "yes"):
+        return True
+    if s in ("false", "0", "no"):
+        return False
+    return None
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# 1. Parse CLI – every value stays a string so placeholders survive.
+# ────────────────────────────────────────────────────────────────────────────
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(description="Start ComfyDock Server (Pinokio)")
+    p.add_argument("--db-file-path", type=str)
+    p.add_argument("--user-settings-file-path", type=str)
+    p.add_argument("--frontend-host-port", type=str)
+    p.add_argument("--allow-multiple-containers", type=str,
+                   help="true / false  (Pinokio passes {{env.*}} when unset)")
+    p.add_argument("--config", type=Path,
+                   help="Optional user config (default: ~/.comfydock/config.json)")
+    return p.parse_args()
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# 2. Translate CLI → overrides dict (skip placeholders).
+# ────────────────────────────────────────────────────────────────────────────
+def build_cli_overrides(ns: argparse.Namespace) -> dict:
+    o: dict = {}
+
+    if ns.db_file_path and not is_placeholder(ns.db_file_path):
+        o.setdefault("defaults", {})["db_file_path"] = ns.db_file_path
+
+    if ns.user_settings_file_path and not is_placeholder(ns.user_settings_file_path):
+        o.setdefault("defaults", {})["user_settings_file_path"] = (
+            ns.user_settings_file_path
+        )
+
+    allow_multi = to_bool(ns.allow_multiple_containers)
+    if allow_multi is not None:            # None ⇒ placeholder or invalid
+        o.setdefault("defaults", {})["allow_multiple_containers"] = allow_multi
+
+    host_port = to_int(ns.frontend_host_port)
+    if host_port is not None:
+        o.setdefault("frontend", {})["default_host_port"] = host_port
+
+    # Pinokio always launches from the repo root:
+    o.setdefault("defaults", {})["comfyui_path"] = os.getcwd()
+    return o
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# 3. Load configs once.
+# ────────────────────────────────────────────────────────────────────────────
+def create_configs(args: argparse.Namespace) -> AppConfig:
+    app_cfg = load_config(
+        cli_overrides=build_cli_overrides(args),
+        user_config_path=Path(__file__).with_name("logging_config.json"),
     )
-    parser.add_argument(
-        "--db-file-path",
-        type=parse_str_with_default(config_data["defaults"]["db_file_path"]),
-        help="Path to environments database file",
-    )
-
-    parser.add_argument(
-        "--user-settings-file-path",
-        type=parse_str_with_default(config_data["defaults"]["user_settings_file_path"]),
-        help="Path to user settings file",
-    )
-    parser.add_argument(
-        "--frontend-host-port",
-        type=parse_int_with_default(config_data["frontend"]["default_host_port"]),
-        help="Frontend host port",
-    )
-    parser.add_argument(
-        "--allow-multiple-containers",
-        type=parse_bool_with_default(config_data["defaults"]["allow_multiple_containers"]),
-        help="Allow running multiple containers",
-    )
-    return parser.parse_args()
+    return app_cfg
 
 
+# ────────────────────────────────────────────────────────────────────────────
+# 4. Main runtime.
+# ────────────────────────────────────────────────────────────────────────────
+def main() -> None:
+    args = parse_args()
+    app_cfg = create_configs(args)
 
-def signal_handler(signum, frame):
-    print(f"\nReceived signal {signum}. Shutting down gracefully...")
-    if "server" in globals():
-        print("Stopping server...")
+    logging.config.dictConfig(app_cfg.logging.__root__)
+
+    server = ComfyDockServer(app_cfg)
+
+    def _graceful_exit(signum, _frame) -> None:
+        print(f"\nReceived signal {signum}. Shutting down gracefully…")
         server.stop()
-    sys.exit(0)
+        sys.exit(0)
 
+    signal.signal(signal.SIGINT, _graceful_exit)
+    signal.signal(signal.SIGTERM, _graceful_exit)
 
-def load_config():
-    config_path = Path(__file__).parent / "config.json"
-    try:
-        with open(config_path) as f:
-            return json.load(f)
-    except FileNotFoundError:
-        print(f"Configuration file not found at {config_path}")
-        return {}
-    
-    
-def setup_logging(logging_config):
-    logging.config.dictConfig(logging_config)
-
-def run():
-    config_data = load_config()
-    args = parse_args(config_data)
-    
-    setup_logging(config_data["logging"])
-
-    # Create configuration with default values
-    config = ServerConfig(
-        comfyui_path=os.getcwd(),
-        db_file_path=args.db_file_path or config_data["defaults"]["db_file_path"],
-        user_settings_file_path=args.user_settings_file_path
-        or config_data["defaults"]["user_settings_file_path"],
-        frontend_image=config_data["frontend"]["image"],
-        frontend_container_port=config_data["frontend"]["container_port"],
-        frontend_host_port=args.frontend_host_port
-        or config_data["frontend"]["default_host_port"],
-        backend_port=config_data["backend"]["port"],
-        backend_host=config_data["backend"]["host"],
-        allow_multiple_containers=(
-            args.allow_multiple_containers
-            if args.allow_multiple_containers is not None
-            else config_data["defaults"]["allow_multiple_containers"]
-        ),
-    )
-
-    # Initialize server
-    server = ComfyDockServer(config)
-
-    # Register signal handlers
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
+    print("Starting ComfyDock Server …")
+    server.start()
 
     try:
-        print("Starting server...")
-        server.start()
-
-        # Keep server running
         while True:
-
-            try:
-                input("")
-            except KeyboardInterrupt:
-                signal_handler(signal.SIGINT, None)
-    finally:
-        print("Stopping server...")
-        server.stop()
+            input()
+    except (KeyboardInterrupt, EOFError):
+        _graceful_exit(signal.SIGINT, None)
 
 
 if __name__ == "__main__":
-    run()
+    main()

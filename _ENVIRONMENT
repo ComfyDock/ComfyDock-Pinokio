@@ -21,12 +21,3 @@ USER_SETTINGS_FILE_PATH=user.settings.json
 #
 #####################################################################################################################
 FRONTEND_HOST_PORT=8000
-
-#####################################################################################################################
-#
-# ALLOW_RUNNING_MULTIPLE_CONTAINERS (True/False)
-# Should be set to true if you want to allow running multiple environments on the same machine.
-# Note: If containers share the same port, they will conflict with each other.
-#
-#####################################################################################################################
-ALLOW_MULTIPLE_CONTAINERS=False
