@@ -1,5 +1,11 @@
 # **ComfyDock**
 
+## Update
+
+***This repo is now ARCHIVED and will not see further development. To access the new version of ComfyDock (v1.0+) please visit the [monorepo](https://github.com/ComfyDock/ComfyDock).***
+
+---
+
 ⭐ **If you find this tool helpful, please consider giving this repo a star!** ⭐
 
 
@@ -151,3 +157,4 @@ https://github.com/user-attachments/assets/ac2880f6-55b8-4b03-97e8-8ba0f86de87e
 ---
 
 ⭐ **Enjoy the tool? Don’t forget to star the repo and share it with your community!**
+
